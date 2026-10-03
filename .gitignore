@@ -1,0 +1,15 @@
+# secrets and local config must never be committed
+.env
+.env.*
+*.key
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
+
+# packaged builds
+*.zip
+*.crx
+*.pem

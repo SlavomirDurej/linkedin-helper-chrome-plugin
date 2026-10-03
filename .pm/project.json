@@ -1,0 +1,94 @@
+{
+  "$schema": "pm-manifest-v1",
+  "name": "linkedin-distance-chrome-plugin",
+  "description": "Chrome extension (Manifest V3) for LinkedIn job pages. Adds a map pin after the open job's location; hovering or clicking it shows driving distance and drive time from a configurable UK postcode (default SW1A 1AA). Uses free OpenStreetMap services by default, and optionally Google Maps (Places + Routes) to route to the company's actual office. Personal use only, loaded unpacked - not published to the Chrome Web Store.",
+  "tags": [
+    "personal",
+    "chrome-extension"
+  ],
+  "status": "active",
+  "focus": "Confirm the Google Maps key path on a real job (Geomiq, London should show the Vyner St office)",
+  "run": [
+    {
+      "name": "Syntax check",
+      "command": "node --check background.js && node --check content.js && node --check options.js",
+      "description": "Parses the three extension scripts. After any change, reload the extension in chrome://extensions and refresh the LinkedIn tab."
+    }
+  ],
+  "deploy": [],
+  "environments": {
+    "local": {
+      "url": "https://www.linkedin.com/jobs/",
+      "localPath": ".",
+      "notes": "Installed via chrome://extensions > Developer mode > Load unpacked (this folder). No build step."
+    }
+  },
+  "services": [
+    {
+      "name": "postcodes.io",
+      "url": "https://postcodes.io",
+      "docsUrl": "https://postcodes.io/docs",
+      "notes": "Origin postcode to coordinates. Free, no key."
+    },
+    {
+      "name": "Nominatim (OpenStreetMap)",
+      "url": "https://nominatim.openstreetmap.org",
+      "docsUrl": "https://operations.osmfoundation.org/policies/nominatim/",
+      "notes": "Job town to coordinates. Free, no key; max 1 request/second, personal use only."
+    },
+    {
+      "name": "Photon (Komoot)",
+      "url": "https://photon.komoot.io",
+      "docsUrl": "https://github.com/komoot/photon",
+      "notes": "Fallback geocoder when Nominatim fails. Free, no key."
+    },
+    {
+      "name": "OSRM public routing",
+      "url": "https://router.project-osrm.org",
+      "docsUrl": "https://project-osrm.org/docs/v5.24.0/api/",
+      "notes": "Driving distance/time without traffic. Free demo server, with routing.openstreetmap.de as fallback."
+    },
+    {
+      "name": "Google Maps Platform",
+      "url": "https://console.cloud.google.com/apis/credentials",
+      "docsUrl": "https://developers.google.com/maps/documentation/routes",
+      "credentialRef": "linkedin-distance-google-maps",
+      "notes": "Optional. Places API (New) finds the company office, Routes API gives traffic-aware drive time. Key 'LinkedJobDistanceSearchAPI' in the Intellink Google Cloud project; entered in the extension popup and stored in chrome.storage.local, never in this folder."
+    }
+  ],
+  "databases": [],
+  "docs": [
+    {
+      "path": "README.md",
+      "type": "master",
+      "title": "LinkedIn Job Distance - README"
+    }
+  ],
+  "links": [
+    {
+      "title": "LinkedIn Jobs",
+      "url": "https://www.linkedin.com/jobs/"
+    },
+    {
+      "title": "Chrome extensions page",
+      "url": "chrome://extensions"
+    },
+    {
+      "title": "Google Cloud API credentials",
+      "url": "https://console.cloud.google.com/apis/credentials"
+    },
+    {
+      "title": "Google Maps Platform pricing",
+      "url": "https://mapsplatform.google.com/pricing/"
+    }
+  ],
+  "assets": {
+    "dirs": [
+      "icons"
+    ]
+  },
+  "ports": [],
+  "git": {
+    "remote": "https://github.com/SlavomirDurej/linkedin-distance-chrome-plugin.git"
+  }
+}

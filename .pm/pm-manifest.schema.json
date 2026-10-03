@@ -1,0 +1,148 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "pm-manifest-v1",
+  "title": "ProjectManager project manifest",
+  "type": "object",
+  "required": ["name"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "client": { "type": "string", "description": "clientId from ProjectManager clients.json" },
+    "status": { "enum": ["active", "paused", "waiting-on-client", "done", "idea"] },
+    "focus": { "type": "string" },
+    "waitingOn": {
+      "type": "object",
+      "required": ["note", "since"],
+      "properties": { "note": { "type": "string" }, "since": { "type": "string" } }
+    },
+    "run": { "type": "array", "items": { "$ref": "#/definitions/action" } },
+    "deploy": { "type": "array", "items": { "$ref": "#/definitions/action" } },
+    "environments": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "url": { "type": "string" },
+          "healthCheck": { "type": "string" },
+          "localPath": { "type": "string", "description": "where this environment's code lives — relative to project root (e.g. website) or absolute" },
+          "notes": { "type": "string" },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["kind", "host"],
+              "additionalProperties": false,
+              "properties": {
+                "kind": { "enum": ["ssh", "sftp", "ftp"] },
+                "host": { "type": "string" },
+                "port": { "type": "integer" },
+                "user": { "type": "string" },
+                "credentialRef": { "type": "string" },
+                "notes": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "services": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "url": { "type": "string" },
+          "docsUrl": { "type": "string" },
+          "credentialRef": { "type": "string" },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "databases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "engine"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "engine": { "enum": ["postgres", "mysql", "sqlite", "mssql", "other"] },
+          "host": { "type": "string" },
+          "port": { "type": "integer" },
+          "database": { "type": "string" },
+          "user": { "type": "string" },
+          "webUI": { "type": "string" },
+          "credentialRef": { "type": "string" },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "git": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "remote": { "type": "string" },
+        "dir": { "type": "string", "description": "relative path to the repo root when it is not the project root" }
+      }
+    },
+    "docs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string" },
+          "type": { "enum": ["master", "planning", "feature", "frontend", "backend", "api", "other"] },
+          "title": { "type": "string" }
+        }
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title", "url"],
+        "additionalProperties": false,
+        "properties": { "title": { "type": "string" }, "url": { "type": "string" } }
+      }
+    },
+    "planning": {
+      "type": "object",
+      "required": ["dir"],
+      "additionalProperties": false,
+      "properties": { "dir": { "type": "string" } }
+    },
+    "assets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dir": { "type": "string", "description": "legacy single asset folder" },
+        "dirs": { "type": "array", "items": { "type": "string" }, "description": "asset folders, each shown as a section (e.g. docs/assets, public)" }
+      }
+    },
+    "ports": { "type": "array", "items": { "type": "integer" } }
+  },
+  "definitions": {
+    "action": {
+      "type": "object",
+      "required": ["name", "command"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "command": { "type": "string" },
+        "cwd": { "type": "string" },
+        "confirm": { "type": "boolean" },
+        "danger": { "type": "boolean" },
+        "env": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    }
+  }
+}

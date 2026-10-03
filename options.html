@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>LinkedIn Job Distance</title>
+    <style>
+      body {
+        width: 280px;
+        margin: 0;
+        padding: 16px;
+        font: 14px/1.4 -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif;
+        color: #1d2226;
+        background: #fff;
+      }
+      h1 {
+        font-size: 15px;
+        margin: 0 0 12px;
+      }
+      label {
+        display: block;
+        font-weight: 600;
+        margin: 10px 0 4px;
+      }
+      input,
+      select {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 7px 8px;
+        font: inherit;
+        border: 1px solid #8c9299;
+        border-radius: 4px;
+      }
+      input {
+        text-transform: uppercase;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        margin-top: 14px;
+      }
+      button {
+        padding: 7px 14px;
+        font: inherit;
+        font-weight: 600;
+        border-radius: 16px;
+        border: 1px solid #0a66c2;
+        cursor: pointer;
+      }
+      #save {
+        background: #0a66c2;
+        color: #fff;
+      }
+      #clear {
+        background: #fff;
+        color: #0a66c2;
+      }
+      #status {
+        min-height: 18px;
+        margin-top: 10px;
+        font-size: 12px;
+      }
+      #status.ok {
+        color: #057642;
+      }
+      #status.err {
+        color: #b24020;
+      }
+      p.hint {
+        margin: 12px 0 0;
+        font-size: 11px;
+        color: #666;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>📍 LinkedIn Job Distance</h1>
+    <form id="form">
+      <label for="postcode">Origin postcode (UK)</label>
+      <input id="postcode" type="text" autocomplete="off" spellcheck="false" placeholder="SW1A 1AA" />
+      <label for="units">Distance units</label>
+      <select id="units">
+        <option value="mi">Miles</option>
+        <option value="km">Kilometres</option>
+      </select>
+      <label for="googleKey">Google Maps API key (optional)</label>
+      <input id="googleKey" type="password" autocomplete="off" spellcheck="false" style="text-transform: none" />
+      <div class="row">
+        <button id="save" type="submit">Save</button>
+        <button id="clear" type="button">Clear cache</button>
+      </div>
+    </form>
+    <div id="status" role="status"></div>
+    <p class="hint">
+      Without a key: free OpenStreetMap routing to the town centre, no live traffic. With a key (Places API
+      (New) and Routes API enabled): routes to the company's office when Google can find it, with traffic.
+    </p>
+    <script src="options.js"></script>
+  </body>
+</html>
