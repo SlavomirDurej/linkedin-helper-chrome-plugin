@@ -1,7 +1,8 @@
 # LinkedIn Job Distance
 
 A Chrome extension that adds a map pin after the location of the job you have open on LinkedIn. Hover or
-click the pin to see the driving distance and drive time from your home postcode.
+click the pin to see the driving distance and drive time from your home postcode. A **Send to Claude**
+button next to Save opens the job as a new chat in a claude.ai project.
 
 Personal-use tool, loaded unpacked. It is not published to the Chrome Web Store (see
 [Why it is not published](#why-it-is-not-published)).
@@ -13,6 +14,7 @@ Personal-use tool, loaded unpacked. It is not published to the Chrome Web Store 
 - The popover shows distance, drive time, where the route ends, and a link to the same route in Google Maps.
 - Country-only locations (`United Kingdom`, `England, United Kingdom`, `United Kingdom (Remote)`) get no pin.
 - Job cards in the results list get no pin; only the open job does.
+- Adds a **Send to Claude** button next to Save (see [Send to Claude](#send-to-claude)).
 
 ## Install
 
@@ -31,6 +33,8 @@ Click the extension's toolbar icon.
 | Origin postcode (UK) | `SW1A 1AA` | Validated against postcodes.io on save. A bare outcode such as `SW1A` also works. |
 | Distance units | Miles | Miles or kilometres. |
 | Google Maps API key | empty | Optional; see below. Stored in `chrome.storage.local` on this machine only. |
+| "Send to Claude" project URL | the JOBS EVALUATOR project | Any `https://claude.ai/` page with a message box, e.g. a project or `https://claude.ai/new`. |
+| Send the message automatically | on | Off leaves the job in the message box for you to review and send. |
 
 **Clear cache** removes stored lookups but keeps your settings and key.
 
@@ -62,6 +66,19 @@ Google drive times for 12 hours, everything else for 30 days.
 5. Optionally cap daily quota for both APIs under **Quotas**.
 6. Paste the key into the extension popup and save. Never put it in this folder.
 
+## Send to Claude
+
+Clicking the button collects, from the open job:
+
+- the top card down to the Apply/Save buttons: company, title, the location line, the "Promoted by" line,
+  workplace type and job type;
+- the whole **About the job** section.
+
+It then opens the project URL, pastes the text into the message box and sends it. The first send opens
+a new tab; later sends reuse that tab (starting a new chat in it) until you close it. You must
+be signed in to claude.ai in the same Chrome profile. The text is held in `chrome.storage.session` for
+that one tab and dropped after two minutes if the page never picks it up.
+
 ## How it works
 
 | File | Role |
@@ -69,7 +86,8 @@ Google drive times for 12 hours, everything else for 30 days.
 | `manifest.json` | Manifest V3 definition, host permissions for the lookup services. |
 | `content.js` | Runs on linkedin.com. Finds the location line, inserts the pin, renders the popover. |
 | `content.css` | Pin and popover styles. |
-| `background.js` | Service worker. Does all network calls and caching. |
+| `background.js` | Service worker. Does all network calls and caching; opens the Claude tab. |
+| `claude.js` | Runs on claude.ai. Pastes a job sent from LinkedIn into the message box and sends it. |
 | `options.html`, `options.js` | Settings popup. |
 | `icons/` | Toolbar and store icons. |
 
@@ -98,6 +116,11 @@ The company name comes from the nearest `/company/` link above the location line
   linked, or key restrictions not yet applied (allow 5 minutes).
 - **No pin on any job:** LinkedIn has probably changed its page structure; the heuristics in
   `findByText` in `content.js` need adjusting.
+
+- **No "Send to Claude" button:** the description or the top card was not found; adjust
+  `findDescription` / `findTopCard` in `content.js`.
+- **Claude tab opens but nothing is pasted or sent:** claude.ai has changed its message box; update the
+  selectors at the top of `claude.js`.
 
 ## Why it is not published
 

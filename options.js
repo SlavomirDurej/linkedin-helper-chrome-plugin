@@ -1,9 +1,16 @@
-const DEFAULTS = { postcode: 'SW1A 1AA', units: 'mi' };
+const DEFAULTS = {
+  postcode: 'SW1A 1AA',
+  units: 'mi',
+  claudeUrl: 'https://claude.ai/project/01a081ac-eaa4-766b-a8f5-3fb641f7146b',
+  claudeAutoSend: true
+};
 
 const form = document.getElementById('form');
 const postcodeInput = document.getElementById('postcode');
 const unitsSelect = document.getElementById('units');
 const googleKeyInput = document.getElementById('googleKey');
+const claudeUrlInput = document.getElementById('claudeUrl');
+const claudeAutoSendInput = document.getElementById('claudeAutoSend');
 const status = document.getElementById('status');
 
 function setStatus(text, kind) {
@@ -22,6 +29,8 @@ function send(message) {
 chrome.storage.sync.get(DEFAULTS).then((s) => {
   postcodeInput.value = s.postcode;
   unitsSelect.value = s.units;
+  claudeUrlInput.value = s.claudeUrl;
+  claudeAutoSendInput.checked = s.claudeAutoSend;
 });
 chrome.storage.local.get({ googleKey: '' }).then((s) => {
   googleKeyInput.value = s.googleKey;
@@ -31,11 +40,18 @@ form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const postcode = postcodeInput.value.trim().toUpperCase();
   if (!postcode) return setStatus('Enter a postcode.', 'err');
+  const claudeUrl = claudeUrlInput.value.trim();
+  if (!/^https:\/\/claude\.ai\//.test(claudeUrl)) return setStatus('Claude URL must start with https://claude.ai/', 'err');
   setStatus('Checking postcode…');
   const res = await send({ type: 'validatePostcode', postcode });
   if (!res.ok) return setStatus(res.error, 'err');
   postcodeInput.value = res.data.label;
-  await chrome.storage.sync.set({ postcode: res.data.label, units: unitsSelect.value });
+  await chrome.storage.sync.set({
+    postcode: res.data.label,
+    units: unitsSelect.value,
+    claudeUrl,
+    claudeAutoSend: claudeAutoSendInput.checked
+  });
   await chrome.storage.local.set({ googleKey: googleKeyInput.value.trim() });
   setStatus(`Saved. Origin: ${res.data.label}`, 'ok');
 });

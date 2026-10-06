@@ -1,9 +1,13 @@
 // Content script: finds the location line of the open LinkedIn job, adds a map
 // pin after it, and shows driving distance/time in a popover on hover or click.
+// Also adds a "Send to Claude" button that hands the job text to the background
+// worker, which opens it as a new chat in a claude.ai project.
 
 (() => {
   const PIN_CLASS = 'lidist-pin';
   const POPOVER_CLASS = 'lidist-popover';
+  const SEND_CLASS = 'lidist-send';
+  const SEND_LABEL = 'Send to Claude';
 
   // LinkedIn's class names change often; these are tried first, then a
   // text-based heuristic takes over (see findByText).
@@ -97,7 +101,7 @@
     return '';
   }
 
-  function findByText(found) {
+  function findByText(found, withCountry) {
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {
@@ -111,19 +115,22 @@
         if (raw) {
           // a country-only line ends the search: climbing further would only
           // pick up the company name and job title above it
-          if (!isCountryOnly(raw)) found.add(el);
+          if (withCountry || !isCountryOnly(raw)) found.add(el);
           break;
         }
       }
     }
   }
 
-  function findLocationLines() {
+  // withCountry also returns country-only lines, which get no pin but still
+  // mark where the open job's top card is.
+  function findLocationLines(withCountry) {
     const found = new Set();
+    const usable = withCountry ? rawLocation : lineLocation;
     for (const sel of KNOWN_LINE_SELECTORS) {
-      document.querySelectorAll(sel).forEach((el) => lineLocation(el) && found.add(el));
+      document.querySelectorAll(sel).forEach((el) => usable(el) && found.add(el));
     }
-    findByText(found);
+    findByText(found, withCountry);
     // keep only the innermost match when candidates are nested
     const all = [...found];
     return all.filter((el) => !all.some((other) => other !== el && el.contains(other)));
@@ -347,10 +354,151 @@
   window.addEventListener('scroll', () => activePin && (activePin.isConnected ? position(activePin) : hide()), true);
   window.addEventListener('resize', () => activePin && position(activePin));
 
+  // --- Send to Claude --------------------------------------------------------
+
+  const DESCRIPTION_SELECTORS = ['article.jobs-description__container', '[class*="jobs-description__container"]', '#job-details'];
+  const CARD_NOISE = /^(share|show more options|matches your job preferences\b.*)$/i;
+  const CARD_END = /^(easy apply|apply|save|saved)$/i;
+
+  function findDescription() {
+    for (const sel of DESCRIPTION_SELECTORS) {
+      const hit = document.querySelector(sel);
+      if (hit && norm(hit.innerText).length > 50) return hit;
+    }
+    // class names gone: climb from the "About the job" heading to its section
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      if (norm(node.nodeValue).toLowerCase() !== 'about the job') continue;
+      let hit = node.parentElement;
+      for (let depth = 0; hit && hit !== document.body && depth < 6; depth++, hit = hit.parentElement) {
+        if (norm(hit.innerText).length > 200) return hit;
+      }
+    }
+    return null;
+  }
+
+  // The open job's top card: the largest block around the location line that
+  // stops short of the description.
+  function findTopCard(desc) {
+    let card = findLocationLines(true)[0] || document.querySelector('h1');
+    if (!card || !desc || card.contains(desc) || desc.contains(card)) return null;
+    while (card.parentElement && card.parentElement !== document.body && !card.parentElement.contains(desc)) {
+      card = card.parentElement;
+    }
+    return card;
+  }
+
+  function findSaveButton(card) {
+    return [...card.querySelectorAll('button, a')].find(
+      (b) => !b.classList.contains(SEND_CLASS) && /^saved?$/i.test(norm((b.innerText || '').split('\n')[0]))
+    );
+  }
+
+  // Company, title, location line, workplace and job type; everything from the
+  // Apply/Save buttons down is dropped.
+  function cardText(card) {
+    const lines = [];
+    for (const raw of card.innerText.split('\n')) {
+      const line = norm(raw);
+      if (!line || line === SEND_LABEL || CARD_NOISE.test(line)) continue;
+      if (CARD_END.test(line)) break;
+      if (lines[lines.length - 1] !== line) lines.push(line);
+    }
+    return lines.join('\n');
+  }
+
+  function jobText() {
+    const desc = findDescription();
+    const card = findTopCard(desc);
+    if (!desc || !card) return '';
+    const body = desc.innerText
+      .split('\n')
+      .map((l) => l.replace(/\s+$/, ''))
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    return `${cardText(card)}\n\n${body}`;
+  }
+
+  function flash(btn, text, isError) {
+    const label = btn.querySelector('.lidist-send-label');
+    label.textContent = text;
+    btn.classList.toggle('lidist-send-error', !!isError);
+    clearTimeout(btn.resetTimer);
+    btn.resetTimer = setTimeout(() => {
+      label.textContent = SEND_LABEL;
+      btn.classList.remove('lidist-send-error');
+    }, 2500);
+  }
+
+  function icon(viewBox, d, className) {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', viewBox);
+    svg.setAttribute('aria-hidden', 'true');
+    if (className) svg.setAttribute('class', className);
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    svg.appendChild(path);
+    return svg;
+  }
+
+  // Claude mark, from https://commons.wikimedia.org/wiki/File:Claude_AI_logo.svg
+  const CLAUDE_MARK =
+    'm 105.01,322.07 29.14,-16.35 0.49,-1.42 -0.49,-0.79 h -1.42 l -4.87,-0.3 -16.65,-0.45 -14.44,-0.6 -13.99,-0.75 -3.52,-0.75 -3.3,-4.35 0.34,-2.17 2.96,-1.99 4.24,0.37 9.37,0.64 14.06,0.97 10.2,0.6 15.11,1.57 h 2.4 l 0.34,-0.97 -0.82,-0.6 -0.64,-0.6 -14.55,-9.86 -15.75,-10.42 -8.25,-6 -4.46,-3.04 -2.25,-2.85 -0.97,-6.22 4.05,-4.46 5.44,0.37 1.39,0.37 5.51,4.24 11.77,9.11 15.37,11.32 2.25,1.87 0.9,-0.64 0.11,-0.45 -1.01,-1.69 -8.36,-15.11 -8.92,-15.37 -3.97,-6.37 -1.05,-3.82 c -0.37,-1.57 -0.64,-2.89 -0.64,-4.5 l 4.61,-6.26 2.55,-0.82 6.15,0.82 2.59,2.25 3.82,8.74 6.19,13.76 9.6,18.71 2.81,5.55 1.5,5.14 0.56,1.57 h 0.97 v -0.9 l 0.79,-10.54 1.46,-12.94 1.42,-16.65 0.49,-4.69 2.32,-5.62 4.61,-3.04 3.6,1.72 2.96,4.24 -0.41,2.74 -1.76,11.44 -3.45,17.92 -2.25,12 h 1.31 l 1.5,-1.5 6.07,-8.06 10.2,-12.75 4.5,-5.06 5.25,-5.59 3.37,-2.66 h 6.37 l 4.69,6.97 -2.1,7.2 -6.56,8.32 -5.44,7.05 -7.8,10.5 -4.87,8.4 0.45,0.67 1.16,-0.11 17.62,-3.75 9.52,-1.72 11.36,-1.95 5.14,2.4 0.56,2.44 -2.02,4.99 -12.15,3 -14.25,2.85 -21.22,5.02 -0.26,0.19 0.3,0.37 9.56,0.9 4.09,0.22 h 10.01 l 18.64,1.39 4.87,3.22 2.92,3.94 -0.49,3 -7.5,3.82 -10.12,-2.4 -23.62,-5.62 -8.1,-2.02 h -1.12 v 0.67 l 6.75,6.6 12.37,11.17 15.49,14.4 0.79,3.56 -1.99,2.81 -2.1,-0.3 -13.61,-10.24 -5.25,-4.61 -11.89,-10.01 h -0.79 v 1.05 l 2.74,4.01 14.47,21.75 0.75,6.67 -1.05,2.17 -3.75,1.31 -4.12,-0.75 -8.47,-11.89 -8.74,-13.39 -7.05,-12 -0.86,0.49 -4.16,44.81 -1.95,2.29 -4.5,1.72 -3.75,-2.85 -1.99,-4.61 1.99,-9.11 2.4,-11.89 1.95,-9.45 1.76,-11.74 1.05,-3.9 -0.07,-0.26 -0.86,0.11 -8.85,12.15 -13.46,18.19 -10.65,11.4 -2.55,1.01 -4.42,-2.29 0.41,-4.09 2.47,-3.64 14.74,-18.75 8.89,-11.62 5.74,-6.71 -0.04,-0.97 h -0.34 l -39.15,25.42 -6.97,0.9 -3,-2.81 0.37,-4.61 1.42,-1.5 11.77,-8.1 -0.04,0.04 z';
+  const NEW_TAB_ICON = 'M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4';
+
+  function createSendButton() {
+    const btn = el('button', SEND_CLASS);
+    btn.type = 'button';
+    btn.append(
+      icon('75.96 223.53 148.1 148.2', CLAUDE_MARK, 'lidist-send-mark'),
+      el('span', 'lidist-send-label', SEND_LABEL),
+      icon('0 0 24 24', NEW_TAB_ICON)
+    );
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const text = jobText();
+      if (!text) return flash(btn, 'Job text not found', true);
+      try {
+        chrome.runtime.sendMessage({ type: 'sendToClaude', text }, (res) => {
+          if (chrome.runtime.lastError || !res) flash(btn, 'Refresh this page', true);
+          else if (!res.ok) flash(btn, res.error, true);
+          else flash(btn, 'Sent ✓');
+        });
+      } catch (err) {
+        flash(btn, 'Refresh this page', true);
+      }
+    });
+    return btn;
+  }
+
+  function placeSendButton() {
+    const existing = document.querySelector(`.${SEND_CLASS}`);
+    const card = findTopCard(findDescription());
+    if (!card) {
+      if (existing) existing.remove();
+      return;
+    }
+    if (existing && card.contains(existing)) return;
+    const btn = existing || createSendButton();
+    const save = findSaveButton(card);
+    if (save) {
+      save.after(btn);
+      // same height and text size as LinkedIn's own buttons
+      if (save.offsetHeight) btn.style.height = `${save.offsetHeight}px`;
+      btn.style.fontSize = getComputedStyle(save).fontSize;
+    } else {
+      card.append(btn);
+    }
+  }
+
   // --- Wiring ----------------------------------------------------------------
 
   function scan() {
     if (!onJobsPage()) return;
+    placeSendButton();
     if (activePin && !activePin.isConnected) hide();
     const lines = findLocationLines();
     // drop pins left behind when a line's location changed to something we skip
@@ -368,13 +516,14 @@
     scanTimer = setTimeout(scan, 300);
   }
 
+  const OURS = `.${POPOVER_CLASS}, .${PIN_CLASS}, .${SEND_CLASS}`;
   new MutationObserver((mutations) => {
-    // ignore the mutations caused by our own pin/popover
+    // ignore the mutations caused by our own pin/popover/button
     const external = mutations.some((m) => {
       const t = m.target.nodeType === 1 ? m.target : m.target.parentElement;
-      if (t && t.closest(`.${POPOVER_CLASS}, .${PIN_CLASS}`)) return false;
+      if (t && t.closest(OURS)) return false;
       const nodes = [...m.addedNodes, ...m.removedNodes];
-      return !nodes.length || nodes.some((n) => !(n.nodeType === 1 && n.matches(`.${POPOVER_CLASS}, .${PIN_CLASS}`)));
+      return !nodes.length || nodes.some((n) => !(n.nodeType === 1 && n.matches(OURS)));
     });
     if (external) scheduleScan();
   }).observe(document.body, { childList: true, subtree: true, characterData: true });

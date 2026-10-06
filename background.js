@@ -3,6 +3,11 @@
 // so the content script never needs cross-origin access.
 
 const DEFAULTS = { postcode: 'SW1A 1AA', units: 'mi' };
+const CLAUDE_DEFAULTS = {
+  claudeUrl: 'https://claude.ai/project/01a081ac-eaa4-766b-a8f5-3fb641f7146b',
+  claudeAutoSend: true
+};
+const CLAUDE_PENDING_MS = 2 * 60 * 1000;
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const TRAFFIC_TTL_MS = 12 * 60 * 60 * 1000; // Google drive times include traffic, so keep them fresher
 const CACHE_PREFIXES = ['origin:', 'geo:', 'route:', 'gplace:', 'groute:'];
@@ -260,12 +265,48 @@ async function clearCache() {
   return true;
 }
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+// --- Send to Claude ---------------------------------------------------------
+
+// Loads the project in the Claude tab opened by an earlier send (or a new one
+// if that tab is gone) and parks the job text under the tab's id; claude.js
+// collects it from there once the page has loaded.
+async function sendToClaude(text) {
+  const { claudeUrl, claudeAutoSend } = await chrome.storage.sync.get(CLAUDE_DEFAULTS);
+  if (!/^https:\/\/claude\.ai\//.test(claudeUrl)) throw new Error('Set a claude.ai URL in settings');
+  const pending = { text, autoSend: claudeAutoSend, t: Date.now() };
+  const { claudeTabId } = await chrome.storage.session.get('claudeTabId');
+  let tab = null;
+  const old = claudeTabId != null && (await chrome.tabs.get(claudeTabId).catch(() => null));
+  // only take the tab over if it is still showing Claude
+  if (old && /^https:\/\/claude\.ai\//.test(old.url || '')) {
+    await chrome.storage.session.set({ [`claude:${claudeTabId}`]: pending });
+    tab = await chrome.tabs.update(claudeTabId, { url: claudeUrl, active: true }).catch(() => null);
+    if (!tab) await chrome.storage.session.remove(`claude:${claudeTabId}`);
+  }
+  if (!tab) {
+    tab = await chrome.tabs.create({ url: claudeUrl });
+    await chrome.storage.session.set({ [`claude:${tab.id}`]: pending, claudeTabId: tab.id });
+  }
+  chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+  return true;
+}
+
+async function takeClaudePending(tabId) {
+  const key = `claude:${tabId}`;
+  const hit = (await chrome.storage.session.get(key))[key];
+  if (!hit) return null;
+  await chrome.storage.session.remove(key);
+  return Date.now() - hit.t < CLAUDE_PENDING_MS ? hit : null;
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg !== 'object') return false;
   let work;
   if (msg.type === 'getRoute') work = getRoute(msg.location, msg.company || '');
   else if (msg.type === 'validatePostcode') work = lookupPostcode(msg.postcode);
   else if (msg.type === 'clearCache') work = clearCache();
+  else if (msg.type === 'sendToClaude') work = sendToClaude(String(msg.text || ''));
+  else if (msg.type === 'takeClaudePending') work = takeClaudePending(sender.tab && sender.tab.id);
   else return false;
   work.then(
     (data) => sendResponse({ ok: true, data }),

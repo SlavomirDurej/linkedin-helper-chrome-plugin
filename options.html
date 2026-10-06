@@ -33,6 +33,14 @@
       input {
         text-transform: uppercase;
       }
+      label.check {
+        font-weight: 400;
+      }
+      label.check input {
+        width: auto;
+        margin: 0 6px 0 0;
+        vertical-align: -1px;
+      }
       .row {
         display: flex;
         gap: 8px;
@@ -84,6 +92,9 @@
       </select>
       <label for="googleKey">Google Maps API key (optional)</label>
       <input id="googleKey" type="password" autocomplete="off" spellcheck="false" style="text-transform: none" />
+      <label for="claudeUrl">"Send to Claude" project URL</label>
+      <input id="claudeUrl" type="url" autocomplete="off" spellcheck="false" style="text-transform: none" />
+      <label class="check"><input id="claudeAutoSend" type="checkbox" />Send the message automatically</label>
       <div class="row">
         <button id="save" type="submit">Save</button>
         <button id="clear" type="button">Clear cache</button>

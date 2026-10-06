@@ -92,3 +92,53 @@
   color: #71b7fb;
   text-decoration: underline;
 }
+
+.lidist-send {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 6px;
+  box-sizing: border-box;
+  min-height: 32px;
+  margin: 0 0 0 8px;
+  padding: 0 16px;
+  border: 1px solid #c6613f;
+  border-radius: 24px;
+  background: transparent;
+  color: #c6613f;
+  font: 600 16px/1.25 -apple-system, system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.lidist-send:hover,
+.lidist-send:focus-visible {
+  background-color: rgba(198, 97, 63, 0.1);
+  box-shadow: inset 0 0 0 1px #c6613f;
+  outline: none;
+}
+
+.lidist-send svg {
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.lidist-send svg.lidist-send-mark {
+  width: 1.2em;
+  height: 1.2em;
+  fill: #d97757;
+  stroke: none;
+}
+
+.lidist-send.lidist-send-error {
+  border-color: #b24020;
+  color: #b24020;
+}
