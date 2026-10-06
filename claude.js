@@ -24,7 +24,7 @@
 
   function notify(text) {
     const box = document.createElement('div');
-    box.textContent = `LinkedIn Job Distance: ${text}`;
+    box.textContent = `LinkedIn Helper: ${text}`;
     box.style.cssText =
       'position:fixed;z-index:2147483000;right:16px;bottom:16px;max-width:320px;padding:10px 12px;border-radius:8px;' +
       'background:#1d2226;color:#fff;font:13px/1.4 system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.35)';

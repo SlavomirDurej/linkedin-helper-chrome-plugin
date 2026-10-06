@@ -8,9 +8,19 @@ const CLAUDE_DEFAULTS = {
   claudeAutoSend: true
 };
 const CLAUDE_PENDING_MS = 2 * 60 * 1000;
+const TRIAGE_DEFAULTS = { triageModel: 'openai/gpt-6-luna' };
+// The prompt describes the candidate, so it lives in a git-ignored file.
+const TRIAGE_PROMPT_FILE = 'triage-prompt.md';
+const TRIAGE_BANDS = [
+  [85, 'perfect'],
+  [70, 'yes'],
+  [50, 'maybe'],
+  [25, 'no'],
+  [0, 'definitely no']
+];
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const TRAFFIC_TTL_MS = 12 * 60 * 60 * 1000; // Google drive times include traffic, so keep them fresher
-const CACHE_PREFIXES = ['origin:', 'geo:', 'route:', 'gplace:', 'groute:'];
+const CACHE_PREFIXES = ['origin:', 'geo:', 'route:', 'gplace:', 'groute:', 'triage:'];
 const OFFICE_MAX_KM = 60; // an "office" further than this from the advertised town is a wrong match
 const ROUTERS = [
   'https://router.project-osrm.org/route/v1/driving/',
@@ -299,6 +309,79 @@ async function takeClaudePending(tabId) {
   return Date.now() - hit.t < CLAUDE_PENDING_MS ? hit : null;
 }
 
+// --- Evaluate: quick fit score from a cheap model (OpenRouter) ---------------
+
+async function triagePrompt() {
+  const res = await fetch(chrome.runtime.getURL(TRIAGE_PROMPT_FILE)).catch(() => null);
+  const text = res && res.ok ? (await res.text()).trim() : '';
+  if (!text) throw new Error(`${TRIAGE_PROMPT_FILE} is missing`);
+  return text;
+}
+
+async function lookupTriage(text) {
+  const { openRouterKey } = await chrome.storage.local.get({ openRouterKey: '' });
+  if (!openRouterKey) throw new Error('Add an OpenRouter key in settings');
+  const { triageModel } = await chrome.storage.sync.get(TRIAGE_DEFAULTS);
+  const body = {
+    model: triageModel || TRIAGE_DEFAULTS.triageModel,
+    messages: [
+      { role: 'system', content: await triagePrompt() },
+      { role: 'user', content: text }
+    ],
+    response_format: { type: 'json_object' },
+    // thinking roughly doubles the wait and did not change the scores in testing
+    reasoning: { effort: 'none' }
+  };
+  const post = async () => {
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${openRouterKey}`,
+        'X-Title': 'LinkedIn Helper'
+      },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json().catch(() => ({}));
+    const error = !res.ok || data.error ? (data.error && data.error.message) || `OpenRouter failed (${res.status})` : '';
+    return { data, error };
+  };
+  let { data, error } = await post();
+  if (/reasoning/i.test(error)) {
+    // some models refuse to run with thinking switched off
+    delete body.reasoning;
+    ({ data, error } = await post());
+  }
+  if (error) throw new Error(error);
+  const reply = String((data.choices && data.choices[0] && data.choices[0].message.content) || '');
+  let parsed = {};
+  try {
+    parsed = JSON.parse((reply.match(/\{[\s\S]*\}/) || [''])[0]) || {};
+  } catch (e) {
+    /* reported below */
+  }
+  const score = Math.round(Number(parsed.score));
+  if (!(score >= 0 && score <= 100)) throw new Error('Model gave no usable score');
+  // the band decides the verdict, so the two can never disagree
+  return {
+    score,
+    verdict: TRIAGE_BANDS.find(([min]) => score >= min)[1],
+    reason: String(parsed.reason || '').replace(/\s+/g, ' ').trim().slice(0, 300)
+  };
+}
+
+async function evaluateJob(jobId, text) {
+  const v = await lookupTriage(text);
+  if (jobId) await chrome.storage.local.set({ [`triage:${jobId}`]: { t: Date.now(), v } });
+  return v;
+}
+
+async function getEvaluation(jobId) {
+  const key = `triage:${jobId}`;
+  const hit = (await chrome.storage.local.get(key))[key];
+  return hit && Date.now() - hit.t < CACHE_TTL_MS ? hit.v : null;
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg !== 'object') return false;
   let work;
@@ -306,6 +389,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   else if (msg.type === 'validatePostcode') work = lookupPostcode(msg.postcode);
   else if (msg.type === 'clearCache') work = clearCache();
   else if (msg.type === 'sendToClaude') work = sendToClaude(String(msg.text || ''));
+  else if (msg.type === 'evaluateJob') work = evaluateJob(String(msg.jobId || ''), String(msg.text || ''));
+  else if (msg.type === 'getEvaluation') work = getEvaluation(String(msg.jobId || ''));
   else if (msg.type === 'takeClaudePending') work = takeClaudePending(sender.tab && sender.tab.id);
   else return false;
   work.then(

@@ -1,13 +1,18 @@
 // Content script: finds the location line of the open LinkedIn job, adds a map
 // pin after it, and shows driving distance/time in a popover on hover or click.
-// Also adds a "Send to Claude" button that hands the job text to the background
-// worker, which opens it as a new chat in a claude.ai project.
+// Also adds two buttons next to Save: "Evaluate" asks a cheap model for a quick
+// fit score, and "Send to Claude" opens the job as a new chat in a claude.ai
+// project. Both hand the job text to the background worker.
 
 (() => {
   const PIN_CLASS = 'lidist-pin';
   const POPOVER_CLASS = 'lidist-popover';
+  const BTN_CLASS = 'lidist-btn';
   const SEND_CLASS = 'lidist-send';
   const SEND_LABEL = 'Send to Claude';
+  const EVAL_CLASS = 'lidist-eval';
+  const EVAL_LABEL = 'Evaluate';
+  const REASON_CLASS = 'lidist-reason';
 
   // LinkedIn's class names change often; these are tried first, then a
   // text-based heuristic takes over (see findByText).
@@ -391,7 +396,7 @@
 
   function findSaveButton(card) {
     return [...card.querySelectorAll('button, a')].find(
-      (b) => !b.classList.contains(SEND_CLASS) && /^saved?$/i.test(norm((b.innerText || '').split('\n')[0]))
+      (b) => !b.classList.contains(BTN_CLASS) && /^saved?$/i.test(norm((b.innerText || '').split('\n')[0]))
     );
   }
 
@@ -399,9 +404,10 @@
   // Apply/Save buttons down is dropped.
   function cardText(card) {
     const lines = [];
+    const ours = new Set([...card.querySelectorAll(`.${BTN_CLASS}, .${REASON_CLASS}`)].map((b) => norm(b.innerText)));
     for (const raw of card.innerText.split('\n')) {
       const line = norm(raw);
-      if (!line || line === SEND_LABEL || CARD_NOISE.test(line)) continue;
+      if (!line || ours.has(line) || CARD_NOISE.test(line)) continue;
       if (CARD_END.test(line)) break;
       if (lines[lines.length - 1] !== line) lines.push(line);
     }
@@ -421,14 +427,35 @@
     return `${cardText(card)}\n\n${body}`;
   }
 
-  function flash(btn, text, isError) {
-    const label = btn.querySelector('.lidist-send-label');
-    label.textContent = text;
-    btn.classList.toggle('lidist-send-error', !!isError);
+  // LinkedIn's id for the open job, used to remember its evaluation.
+  function jobId() {
+    const m = location.pathname.match(/\/jobs\/view\/(\d+)/);
+    return (m && m[1]) || new URLSearchParams(location.search).get('currentJobId') || '';
+  }
+
+  function ask(message) {
+    return new Promise((resolve) => {
+      const gone = { ok: false, error: 'Refresh this page' };
+      try {
+        chrome.runtime.sendMessage(message, (res) => resolve(chrome.runtime.lastError || !res ? gone : res));
+      } catch (e) {
+        resolve(gone);
+      }
+    });
+  }
+
+  function setLabel(btn, text) {
+    btn.querySelector('.lidist-btn-label').textContent = text;
+  }
+
+  // Shows a message on the button for a moment, then calls `restore`.
+  function flash(btn, text, isError, restore) {
+    setLabel(btn, text);
+    btn.classList.toggle('lidist-btn-error', !!isError);
     clearTimeout(btn.resetTimer);
     btn.resetTimer = setTimeout(() => {
-      label.textContent = SEND_LABEL;
-      btn.classList.remove('lidist-send-error');
+      btn.classList.remove('lidist-btn-error');
+      restore();
     }, 2500);
   }
 
@@ -448,57 +475,128 @@
     'm 105.01,322.07 29.14,-16.35 0.49,-1.42 -0.49,-0.79 h -1.42 l -4.87,-0.3 -16.65,-0.45 -14.44,-0.6 -13.99,-0.75 -3.52,-0.75 -3.3,-4.35 0.34,-2.17 2.96,-1.99 4.24,0.37 9.37,0.64 14.06,0.97 10.2,0.6 15.11,1.57 h 2.4 l 0.34,-0.97 -0.82,-0.6 -0.64,-0.6 -14.55,-9.86 -15.75,-10.42 -8.25,-6 -4.46,-3.04 -2.25,-2.85 -0.97,-6.22 4.05,-4.46 5.44,0.37 1.39,0.37 5.51,4.24 11.77,9.11 15.37,11.32 2.25,1.87 0.9,-0.64 0.11,-0.45 -1.01,-1.69 -8.36,-15.11 -8.92,-15.37 -3.97,-6.37 -1.05,-3.82 c -0.37,-1.57 -0.64,-2.89 -0.64,-4.5 l 4.61,-6.26 2.55,-0.82 6.15,0.82 2.59,2.25 3.82,8.74 6.19,13.76 9.6,18.71 2.81,5.55 1.5,5.14 0.56,1.57 h 0.97 v -0.9 l 0.79,-10.54 1.46,-12.94 1.42,-16.65 0.49,-4.69 2.32,-5.62 4.61,-3.04 3.6,1.72 2.96,4.24 -0.41,2.74 -1.76,11.44 -3.45,17.92 -2.25,12 h 1.31 l 1.5,-1.5 6.07,-8.06 10.2,-12.75 4.5,-5.06 5.25,-5.59 3.37,-2.66 h 6.37 l 4.69,6.97 -2.1,7.2 -6.56,8.32 -5.44,7.05 -7.8,10.5 -4.87,8.4 0.45,0.67 1.16,-0.11 17.62,-3.75 9.52,-1.72 11.36,-1.95 5.14,2.4 0.56,2.44 -2.02,4.99 -12.15,3 -14.25,2.85 -21.22,5.02 -0.26,0.19 0.3,0.37 9.56,0.9 4.09,0.22 h 10.01 l 18.64,1.39 4.87,3.22 2.92,3.94 -0.49,3 -7.5,3.82 -10.12,-2.4 -23.62,-5.62 -8.1,-2.02 h -1.12 v 0.67 l 6.75,6.6 12.37,11.17 15.49,14.4 0.79,3.56 -1.99,2.81 -2.1,-0.3 -13.61,-10.24 -5.25,-4.61 -11.89,-10.01 h -0.79 v 1.05 l 2.74,4.01 14.47,21.75 0.75,6.67 -1.05,2.17 -3.75,1.31 -4.12,-0.75 -8.47,-11.89 -8.74,-13.39 -7.05,-12 -0.86,0.49 -4.16,44.81 -1.95,2.29 -4.5,1.72 -3.75,-2.85 -1.99,-4.61 1.99,-9.11 2.4,-11.89 1.95,-9.45 1.76,-11.74 1.05,-3.9 -0.07,-0.26 -0.86,0.11 -8.85,12.15 -13.46,18.19 -10.65,11.4 -2.55,1.01 -4.42,-2.29 0.41,-4.09 2.47,-3.64 14.74,-18.75 8.89,-11.62 5.74,-6.71 -0.04,-0.97 h -0.34 l -39.15,25.42 -6.97,0.9 -3,-2.81 0.37,-4.61 1.42,-1.5 11.77,-8.1 -0.04,0.04 z';
   const NEW_TAB_ICON = 'M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4';
 
-  function createSendButton() {
-    const btn = el('button', SEND_CLASS);
+  function createButton(className, label, children, onClick) {
+    const btn = el('button', `${BTN_CLASS} ${className}`);
     btn.type = 'button';
-    btn.append(
-      icon('75.96 223.53 148.1 148.2', CLAUDE_MARK, 'lidist-send-mark'),
-      el('span', 'lidist-send-label', SEND_LABEL),
-      icon('0 0 24 24', NEW_TAB_ICON)
-    );
+    btn.append(...children(el('span', 'lidist-btn-label', label)));
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const text = jobText();
-      if (!text) return flash(btn, 'Job text not found', true);
-      try {
-        chrome.runtime.sendMessage({ type: 'sendToClaude', text }, (res) => {
-          if (chrome.runtime.lastError || !res) flash(btn, 'Refresh this page', true);
-          else if (!res.ok) flash(btn, res.error, true);
-          else flash(btn, 'Sent ✓');
-        });
-      } catch (err) {
-        flash(btn, 'Refresh this page', true);
-      }
+      onClick(btn);
     });
     return btn;
   }
 
-  function placeSendButton() {
-    const existing = document.querySelector(`.${SEND_CLASS}`);
+  function createSendButton() {
+    const reset = (btn) => () => setLabel(btn, SEND_LABEL);
+    return createButton(
+      SEND_CLASS,
+      SEND_LABEL,
+      (label) => [icon('75.96 223.53 148.1 148.2', CLAUDE_MARK, 'lidist-send-mark'), label, icon('0 0 24 24', NEW_TAB_ICON)],
+      async (btn) => {
+        const text = jobText();
+        if (!text) return flash(btn, 'Job text not found', true, reset(btn));
+        const res = await ask({ type: 'sendToClaude', text });
+        flash(btn, res.ok ? 'Sent ✓' : res.error, !res.ok, reset(btn));
+      }
+    );
+  }
+
+  // --- Evaluate --------------------------------------------------------------
+
+  // `result` is { score, verdict, reason }, or null for "not evaluated yet".
+  // The reason goes on its own line under the buttons.
+  function showVerdict(btn, result) {
+    clearTimeout(btn.resetTimer);
+    btn.classList.remove('lidist-btn-error', 'lidist-eval-busy');
+    btn.dataset.verdict = result ? result.verdict : '';
+    setLabel(btn, result ? `${result.score} · ${result.verdict}` : EVAL_LABEL);
+    btn.title = result ? 'Click to evaluate again' : 'Quick fit score for this job';
+    btn.result = result;
+    const reason = document.querySelector(`.${REASON_CLASS}`);
+    if (!reason) return;
+    reason.textContent = (result && result.reason) || '';
+    reason.dataset.verdict = btn.dataset.verdict;
+  }
+
+  function createEvalButton() {
+    return createButton(EVAL_CLASS, EVAL_LABEL, (label) => [label], async (btn) => {
+      if (btn.classList.contains('lidist-eval-busy')) return;
+      const job = jobId();
+      const text = jobText();
+      const before = btn.result;
+      if (!text) return flash(btn, 'Job text not found', true, () => showVerdict(btn, before));
+      showVerdict(btn, null);
+      btn.classList.add('lidist-eval-busy');
+      setLabel(btn, 'Evaluating…');
+      const res = await ask({ type: 'evaluateJob', jobId: job, text });
+      if (btn.dataset.job !== job) return; // another job was opened meanwhile
+      btn.classList.remove('lidist-eval-busy');
+      if (res.ok) return showVerdict(btn, res.data);
+      btn.title = res.error;
+      flash(btn, res.error, true, () => showVerdict(btn, before));
+    });
+  }
+
+  // Shows the stored verdict when the open job has been evaluated before.
+  function syncEvalButton(btn) {
+    const job = jobId();
+    if (btn.dataset.job === job) return;
+    btn.dataset.job = job;
+    showVerdict(btn, null);
+    if (!job) return;
+    ask({ type: 'getEvaluation', jobId: job }).then((res) => {
+      if (res.ok && res.data && btn.dataset.job === job) showVerdict(btn, res.data);
+    });
+  }
+
+  function isFlexRow(node) {
+    const s = getComputedStyle(node);
+    return s.display.includes('flex') && !s.flexDirection.includes('column');
+  }
+
+  function placeButtons() {
     const card = findTopCard(findDescription());
     if (!card) {
-      if (existing) existing.remove();
+      document.querySelectorAll(`.${BTN_CLASS}, .${REASON_CLASS}`).forEach((b) => b.remove());
       return;
     }
-    if (existing && card.contains(existing)) return;
-    const btn = existing || createSendButton();
-    const save = findSaveButton(card);
-    if (save) {
-      save.after(btn);
-      // same height and text size as LinkedIn's own buttons
-      if (save.offsetHeight) btn.style.height = `${save.offsetHeight}px`;
-      btn.style.fontSize = getComputedStyle(save).fontSize;
-    } else {
-      card.append(btn);
+    const evalBtn = document.querySelector(`.${EVAL_CLASS}`) || createEvalButton();
+    const sendBtn = document.querySelector(`.${SEND_CLASS}`) || createSendButton();
+    const reason = document.querySelector(`.${REASON_CLASS}`) || el('div', REASON_CLASS);
+    if (!card.contains(evalBtn) || !card.contains(sendBtn) || !card.contains(reason)) {
+      const save = findSaveButton(card);
+      // LinkedIn may wrap each button in its own box: climb to the item that
+      // sits directly in the horizontal button row and join that row.
+      let anchor = save;
+      for (let depth = 0; anchor && depth < 3 && card.contains(anchor.parentElement); depth++) {
+        if (isFlexRow(anchor.parentElement)) break;
+        anchor = anchor.parentElement;
+      }
+      if (anchor && !isFlexRow(anchor.parentElement)) anchor = save;
+      if (anchor) {
+        anchor.after(evalBtn, sendBtn);
+        anchor.parentElement.after(reason);
+      } else {
+        card.append(evalBtn, sendBtn, reason);
+      }
+      showVerdict(evalBtn, evalBtn.result || null);
+      const rowGap = anchor && parseFloat(getComputedStyle(anchor.parentElement).columnGap) > 0;
+      for (const btn of save ? [evalBtn, sendBtn] : []) {
+        // same height and text size as LinkedIn's own buttons
+        if (save.offsetHeight) btn.style.height = `${save.offsetHeight}px`;
+        btn.style.fontSize = getComputedStyle(save).fontSize;
+        btn.style.marginLeft = rowGap ? '0' : '';
+      }
     }
+    syncEvalButton(evalBtn);
   }
 
   // --- Wiring ----------------------------------------------------------------
 
   function scan() {
     if (!onJobsPage()) return;
-    placeSendButton();
+    placeButtons();
     if (activePin && !activePin.isConnected) hide();
     const lines = findLocationLines();
     // drop pins left behind when a line's location changed to something we skip
@@ -516,9 +614,9 @@
     scanTimer = setTimeout(scan, 300);
   }
 
-  const OURS = `.${POPOVER_CLASS}, .${PIN_CLASS}, .${SEND_CLASS}`;
+  const OURS = `.${POPOVER_CLASS}, .${PIN_CLASS}, .${BTN_CLASS}, .${REASON_CLASS}`;
   new MutationObserver((mutations) => {
-    // ignore the mutations caused by our own pin/popover/button
+    // ignore the mutations caused by our own pin/popover/buttons
     const external = mutations.some((m) => {
       const t = m.target.nodeType === 1 ? m.target : m.target.parentElement;
       if (t && t.closest(OURS)) return false;

@@ -1,7 +1,7 @@
 {
   "$schema": "pm-manifest-v1",
   "name": "linkedin-distance-chrome-plugin",
-  "description": "Chrome extension (Manifest V3) for LinkedIn job pages. Adds a map pin after the open job's location; hovering or clicking it shows driving distance and drive time from a configurable UK postcode (default SW1A 1AA). Uses free OpenStreetMap services by default, and optionally Google Maps (Places + Routes) to route to the company's actual office. Personal use only, loaded unpacked - not published to the Chrome Web Store.",
+  "description": "LinkedIn Helper: Chrome extension (Manifest V3) for LinkedIn job pages. Adds a map pin after the open job's location showing driving distance and drive time from a configurable UK postcode, an Evaluate button that gets a quick fit score and one-sentence reason from a cheap model via OpenRouter, and a Send to Claude button that opens the job as a new chat in a claude.ai project. Personal use only, loaded unpacked - not published to the Chrome Web Store.",
   "tags": [
     "personal",
     "chrome-extension"
@@ -11,8 +11,8 @@
   "run": [
     {
       "name": "Syntax check",
-      "command": "node --check background.js && node --check content.js && node --check options.js",
-      "description": "Parses the three extension scripts. After any change, reload the extension in chrome://extensions and refresh the LinkedIn tab."
+      "command": "node --check background.js && node --check content.js && node --check options.js && node --check claude.js",
+      "description": "Parses the four extension scripts. After any change, reload the extension in chrome://extensions and refresh the LinkedIn tab."
     }
   ],
   "deploy": [],
@@ -54,6 +54,13 @@
       "docsUrl": "https://developers.google.com/maps/documentation/routes",
       "credentialRef": "linkedin-distance-google-maps",
       "notes": "Optional. Places API (New) finds the company office, Routes API gives traffic-aware drive time. Key 'LinkedJobDistanceSearchAPI' in the Intellink Google Cloud project; entered in the extension popup and stored in chrome.storage.local, never in this folder."
+    },
+    {
+      "name": "OpenRouter",
+      "url": "https://openrouter.ai/settings/keys",
+      "docsUrl": "https://openrouter.ai/docs",
+      "credentialRef": "open-router-api-key-mux1twbcwktrd7",
+      "notes": "Evaluate button: quick job-fit score from a cheap model (default openai/gpt-6-luna, about $0.0003 per job). Key entered in the extension popup and stored in chrome.storage.local, never in this folder. Prompt is in the git-ignored triage-prompt.md."
     }
   ],
   "databases": [],
@@ -61,7 +68,7 @@
     {
       "path": "README.md",
       "type": "master",
-      "title": "LinkedIn Job Distance - README"
+      "title": "LinkedIn Helper - README"
     }
   ],
   "links": [

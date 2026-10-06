@@ -13,3 +13,6 @@ Thumbs.db
 *.zip
 *.crx
 *.pem
+
+# Evaluate prompt: describes the candidate, kept out of the repo
+triage-prompt.md

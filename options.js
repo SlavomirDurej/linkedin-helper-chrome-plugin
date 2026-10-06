@@ -2,7 +2,8 @@ const DEFAULTS = {
   postcode: 'SW1A 1AA',
   units: 'mi',
   claudeUrl: 'https://claude.ai/project/01a081ac-eaa4-766b-a8f5-3fb641f7146b',
-  claudeAutoSend: true
+  claudeAutoSend: true,
+  triageModel: 'openai/gpt-6-luna'
 };
 
 const form = document.getElementById('form');
@@ -11,6 +12,8 @@ const unitsSelect = document.getElementById('units');
 const googleKeyInput = document.getElementById('googleKey');
 const claudeUrlInput = document.getElementById('claudeUrl');
 const claudeAutoSendInput = document.getElementById('claudeAutoSend');
+const openRouterKeyInput = document.getElementById('openRouterKey');
+const triageModelInput = document.getElementById('triageModel');
 const status = document.getElementById('status');
 
 function setStatus(text, kind) {
@@ -31,9 +34,11 @@ chrome.storage.sync.get(DEFAULTS).then((s) => {
   unitsSelect.value = s.units;
   claudeUrlInput.value = s.claudeUrl;
   claudeAutoSendInput.checked = s.claudeAutoSend;
+  triageModelInput.value = s.triageModel;
 });
-chrome.storage.local.get({ googleKey: '' }).then((s) => {
+chrome.storage.local.get({ googleKey: '', openRouterKey: '' }).then((s) => {
   googleKeyInput.value = s.googleKey;
+  openRouterKeyInput.value = s.openRouterKey;
 });
 
 form.addEventListener('submit', async (e) => {
@@ -50,9 +55,13 @@ form.addEventListener('submit', async (e) => {
     postcode: res.data.label,
     units: unitsSelect.value,
     claudeUrl,
-    claudeAutoSend: claudeAutoSendInput.checked
+    claudeAutoSend: claudeAutoSendInput.checked,
+    triageModel: triageModelInput.value.trim() || DEFAULTS.triageModel
   });
-  await chrome.storage.local.set({ googleKey: googleKeyInput.value.trim() });
+  await chrome.storage.local.set({
+    googleKey: googleKeyInput.value.trim(),
+    openRouterKey: openRouterKeyInput.value.trim()
+  });
   setStatus(`Saved. Origin: ${res.data.label}`, 'ok');
 });
 
