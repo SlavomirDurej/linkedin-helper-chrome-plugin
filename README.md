@@ -5,6 +5,8 @@ click the pin to see the driving distance and drive time from your home postcode
 Save triage the job: **Evaluate** gives a quick 0-100 fit score from a cheap model, and **Send to Claude**
 opens the job as a new chat in a claude.ai project.
 
+<img src="docs/linkedin-helper-annotated.png" alt="A LinkedIn job with the map pin, Evaluate and Send to Claude labelled" width="700">
+
 Personal-use tool, loaded unpacked. It is not published to the Chrome Web Store (see
 [Why it is not published](#why-it-is-not-published)).
 
@@ -15,6 +17,9 @@ Personal-use tool, loaded unpacked. It is not published to the Chrome Web Store 
 - The popover shows distance, drive time, where the route ends, and a link to the same route in Google Maps.
 - Country-only locations (`United Kingdom`, `England, United Kingdom`, `United Kingdom (Remote)`) get no pin.
 - Job cards in the results list get no pin; only the open job does.
+
+<img src="docs/pin.png" alt="Popover showing distance, drive time and the office address" width="600">
+
 - Adds an **Evaluate** button next to Save (see [Evaluate](#evaluate)).
 - Adds a **Send to Claude** button after it (see [Send to Claude](#send-to-claude)).
 
@@ -76,6 +81,8 @@ A quick triage before the heavier Claude evaluation. Clicking **Evaluate** sends
 Send to Claude to a cheap model through [OpenRouter](https://openrouter.ai/), together with the prompt in
 `triage-prompt.md`. The button then shows the result, e.g. `82 · yes`, coloured by verdict, with a
 one-sentence reason on the line below:
+
+<img src="docs/evaluate.png" alt="Evaluate button showing 52 - maybe, with the reason underneath" width="600">
 
 | Score | Verdict |
 | --- | --- |
