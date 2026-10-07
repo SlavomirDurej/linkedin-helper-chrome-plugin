@@ -1,6 +1,6 @@
 {
   "$schema": "pm-manifest-v1",
-  "name": "linkedin-distance-chrome-plugin",
+  "name": "linkedin-helper-chrome-plugin",
   "description": "LinkedIn Helper: Chrome extension (Manifest V3) for LinkedIn job pages. Adds a map pin after the open job's location showing driving distance and drive time from a configurable UK postcode, an Evaluate button that gets a quick fit score and one-sentence reason from a cheap model via OpenRouter, and a Send to Claude button that opens the job as a new chat in a claude.ai project. Personal use only, loaded unpacked - not published to the Chrome Web Store.",
   "tags": [
     "personal",
@@ -96,6 +96,6 @@
   },
   "ports": [],
   "git": {
-    "remote": "https://github.com/SlavomirDurej/linkedin-distance-chrome-plugin.git"
+    "remote": "https://github.com/SlavomirDurej/linkedin-helper-chrome-plugin.git"
   }
 }
