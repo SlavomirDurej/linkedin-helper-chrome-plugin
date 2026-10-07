@@ -115,15 +115,22 @@ scores it exactly as the Evaluate button would, from the full description; **Sto
 - Each scored job gets its score and verdict under its title in the list, e.g. `58 · maybe`. Hover it
   for the reason.
 - Jobs scoring under 45 are hidden from the list.
-- The tiles count jobs per score range (`<45`, `45-60`, `61-70`, `71-80`, `81-90`, `91-100`). Click a
-  tile to show only that range; click it again to clear the filter. The `<45` tile shows the hidden jobs.
+- The tiles count jobs per score range (`<45`, `45-60`, `61-70`, `71-80`, `81-90`, `91-100`) across every
+  list page you opened in the last 24 hours, not just the current one.
+- Click a tile to open a panel under the bar listing all of those jobs, best first, with company,
+  location and the reason; each row opens the job in a new tab. The same click filters the current list
+  to that range. Click the tile again, press Esc or use the panel's × to clear it. The `<45` tile shows
+  the hidden jobs.
 - The bar shows the job being processed and a progress count for the current list.
+- With **Auto next page** ticked, the run clicks Next when a page is finished and carries on through the
+  search results. Untick it at any time, even mid-run, and the run stops at the end of the current page.
 - Scores are shared with the Evaluate button and kept for 30 days, so jobs scored before are not paid
   for again. **Clear cache** forgets them.
 
 Each job is opened in the details pane so the complete posting is scored, which means LinkedIn marks
 them as viewed and the pane steps through the list while it runs. When the run ends, the job that was
-open before is opened again. A page of 25 jobs takes about a minute.
+open before is opened again. A page of 25 jobs takes about a minute. Keep the tab in front while it
+runs: LinkedIn does not load jobs in a background tab, so the run pauses until you come back.
 
 ## Send to Claude
 

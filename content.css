@@ -378,6 +378,56 @@
   transition: width 0.25s ease;
 }
 
+.lidist-bar-auto {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+  color: #1d2226;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* LinkedIn hides native checkboxes and draws its own on the label, so this
+   one is drawn from scratch and its rules are forced. */
+.lidist-bar-auto input {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  position: static !important;
+  display: inline-block !important;
+  flex: none;
+  box-sizing: border-box;
+  width: 18px !important;
+  height: 18px !important;
+  margin: 0 !important;
+  border: 2px solid #5b6570;
+  border-radius: 4px;
+  background: #fff center / 12px 12px no-repeat;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  cursor: pointer;
+}
+
+.lidist-bar-auto input:checked {
+  border-color: #0a66c2;
+  background-color: #0a66c2;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 6.2l2.6 2.6L10 3.4' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+.lidist-bar-auto input:focus-visible {
+  outline: 2px solid #0a66c2;
+  outline-offset: 2px;
+}
+
+.lidist-bar-auto::before,
+.lidist-bar-auto::after,
+.lidist-bar-auto span::before,
+.lidist-bar-auto span::after {
+  content: none !important;
+}
+
 .lidist-bar-toggle {
   flex: none;
   min-width: 76px;
@@ -439,4 +489,105 @@
 
 .lidist-hidden {
   display: none !important;
+}
+
+/* --- Results panel: scored jobs from every page (bulk.js) --- */
+
+.lidist-panel {
+  position: fixed;
+  z-index: 2147482000;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid #c9d0d7;
+  border-top: none;
+  border-radius: 0 0 10px 10px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+  color: #1d2226;
+  font: 400 14px/1.4 -apple-system, system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+}
+
+.lidist-panel-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 8px 8px 16px;
+  border-bottom: 1px solid #e3e7eb;
+  background: #f4f6f8;
+  font-weight: 600;
+}
+
+.lidist-panel-close {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #5b6570;
+  font: 400 22px/1 inherit;
+  cursor: pointer;
+}
+
+.lidist-panel-close:hover {
+  background: #e3e7eb;
+}
+
+.lidist-panel-list {
+  overflow-y: auto;
+}
+
+.lidist-panel-empty {
+  padding: 20px 16px;
+  color: #5b6570;
+}
+
+.lidist-panel a.lidist-panel-row,
+.lidist-panel a.lidist-panel-row:visited {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #eef1f3;
+  color: inherit;
+  text-decoration: none;
+}
+
+.lidist-panel a.lidist-panel-row:hover {
+  background: #f4f8fc;
+}
+
+.lidist-panel .lidist-badge {
+  flex: none;
+  min-width: 92px;
+  margin: 1px 0 0;
+  text-align: center;
+}
+
+.lidist-panel-main {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.lidist-panel-title {
+  color: #0a66c2;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.lidist-panel-sub {
+  color: #1d2226;
+}
+
+.lidist-panel-reason {
+  margin-top: 2px;
+  color: #5b6570;
+  font-size: 13px;
 }

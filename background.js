@@ -20,7 +20,7 @@ const TRIAGE_BANDS = [
 ];
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const TRAFFIC_TTL_MS = 12 * 60 * 60 * 1000; // Google drive times include traffic, so keep them fresher
-const CACHE_PREFIXES = ['origin:', 'geo:', 'route:', 'gplace:', 'groute:', 'triage:'];
+const CACHE_PREFIXES = ['origin:', 'geo:', 'route:', 'gplace:', 'groute:', 'triage:', 'bulkSeen'];
 const OFFICE_MAX_KM = 60; // an "office" further than this from the advertised town is a wrong match
 const ROUTERS = [
   'https://router.project-osrm.org/route/v1/driving/',

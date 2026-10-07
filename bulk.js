@@ -2,14 +2,18 @@
 // Adds a control bar above the list, opens every job in it one after another
 // and scores it with the same text and model as the Evaluate button, writes
 // the score under each job title, hides poor matches and lets the score tiles
-// act as filters.
+// act as filters. The tiles count every page visited in the last day, and
+// clicking one lists those jobs in a panel under the bar.
 
 (() => {
   const BAR_CLASS = 'lidist-bar';
   const BADGE_CLASS = 'lidist-badge';
   const HIDDEN_CLASS = 'lidist-hidden';
   const FIT_ATTR = 'data-lidist-fit';
-  const OURS = `.${BAR_CLASS}, .${BADGE_CLASS}`;
+  const PANEL_CLASS = 'lidist-panel';
+  const OURS = `.${BAR_CLASS}, .${BADGE_CLASS}, .${PANEL_CLASS}`;
+  const SEEN_KEY = 'bulkSeen';
+  const SEEN_TTL_MS = 24 * 60 * 60 * 1000;
   const BAR_HEIGHT = 56;
   const OPEN_TIMEOUT_MS = 15000; // how long a job may take to load in the pane
   // Jobs scoring below the first band are hidden from the list.
@@ -30,11 +34,16 @@
   const mine = new WeakSet(); // nodes this instance created
   let running = false;
   let looping = false; // the run() loop is active
+  let paused = false; // waiting for the tab to come back to the front
   const evals = new Set(); // model calls still in flight
   let nowTitle = '';
   let filter = null; // band key, or null for "everything not hidden"
+  let autoNext = false; // carry on to the next page of results when one is done
   let bar = null;
   let jobs = []; // current list: { id, title, row, card }
+  let seen = {}; // jobId -> { t, title, company, location } for every list row met in the last day
+  let seenLoaded = false;
+  let seenTimer = null;
 
   const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
 
@@ -131,6 +140,21 @@
     }
   }
 
+  // LinkedIn only loads a job into the pane while its tab is in front, so a
+  // run waits here whenever the tab is in the background.
+  async function inFront() {
+    if (!document.hidden) return;
+    nowTitle = '';
+    paused = true;
+    renderBar();
+    while (document.hidden) {
+      if (!running) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    paused = false;
+    if (!running) throw new Stopped();
+  }
+
   // The list row for a job as it is right now, and what to click to open it.
   // Classic rows are empty placeholders until they scroll into view.
   function findRow(id) {
@@ -182,6 +206,40 @@
     return last;
   }
 
+  // --- Next page -----------------------------------------------------------------
+
+  function nextButton() {
+    const btn =
+      document.querySelector('button[aria-label="View next page"], [data-testid="pagination-controls-next-button-visible"]') ||
+      [...document.querySelectorAll('button')].find((b) => norm(b.innerText) === 'Next' && b.offsetParent && !b.closest(OURS));
+    return btn && !btn.disabled && btn.getAttribute('aria-disabled') !== 'true' ? btn : null;
+  }
+
+  // Clicks Next and waits for a different set of jobs. False when there is no
+  // next page or it did not load.
+  async function nextPage() {
+    nowTitle = 'Loading the next page…';
+    renderBar();
+    let btn = nextButton();
+    if (!btn && jobs.length) {
+      // the newer layout only adds the pager once the list is scrolled to its end
+      jobs[jobs.length - 1].row.scrollIntoView({ block: 'end' });
+      btn = await until(nextButton, 3000);
+    }
+    if (!btn) return false;
+    const old = new Set(jobs.map((j) => j.id));
+    btn.click();
+    const loaded = await until(() => {
+      const found = readClassicList() || readNewList();
+      return !!found && found.jobs.some((j) => j.id && !old.has(j.id));
+    }, OPEN_TIMEOUT_MS);
+    if (!loaded) return false;
+    await new Promise((r) => setTimeout(r, 800)); // let the rest of the list arrive
+    scan();
+    await loadCached();
+    return true;
+  }
+
   // --- Processing --------------------------------------------------------------
 
   const pending = () => jobs.filter((j) => !results.has(j.id) && !failed.has(j.id) && !busy.has(j.id));
@@ -207,11 +265,18 @@
     const home = window.__lidist ? window.__lidist.jobId() : '';
     while (running) {
       const job = pending()[0];
-      if (!job) break;
+      if (!job) {
+        // page done: the box is read now, so unticking it mid-run stops here
+        if (!autoNext) break;
+        const moved = await nextPage().catch(() => false);
+        if (!moved) break;
+        continue;
+      }
       busy.add(job.id);
-      nowTitle = job.title || `job ${job.id}`;
-      renderBar();
       try {
+        await inFront();
+        nowTitle = job.title || `job ${job.id}`;
+        renderBar();
         evaluate(job.id, await openJob(job));
       } catch (e) {
         busy.delete(job.id);
@@ -232,8 +297,8 @@
   function start() {
     if (running) return;
     failed.clear(); // give earlier failures another go
-    if (!pending().length) return render();
-    filter = null; // filtered-out rows cannot be opened
+    if (!pending().length && !(autoNext && nextButton())) return render();
+    filter = null; // also closes the results panel, which would cover the pane
     running = true;
     run();
     render();
@@ -246,13 +311,141 @@
 
   // Scores from earlier sessions, and from the Evaluate button, are free.
   async function loadCached() {
-    const ids = jobs.map((j) => j.id).filter((id) => !asked.has(id));
+    const ids = [...new Set([...jobs.map((j) => j.id), ...Object.keys(seen)])].filter((id) => !asked.has(id));
     if (!ids.length) return;
     ids.forEach((id) => asked.add(id));
     const res = await ask({ type: 'getEvaluations', jobIds: ids });
     if (!res.ok) return;
     for (const [id, v] of Object.entries(res.data)) results.set(id, v);
     render();
+  }
+
+  // --- Jobs seen across pages -------------------------------------------------------
+
+  // Title, company and location of each job as its list row shows them.
+  function cardMeta(job) {
+    const lines = (job.card.innerText || '')
+      .split('\n')
+      .map(norm)
+      .filter((l) => l && !/^\d{1,3} · /.test(l)) // not our own score line
+      .filter((l) => !job.title || !l.startsWith(job.title)) // the title, and its "with verification" twin
+      .filter((l) => !/^(viewed|promoted|·|easy apply|be an early applicant|dismiss.*|(posted )?.* ago)$/i.test(l));
+    return { title: job.title, company: lines[0] || '', location: lines[1] || '' };
+  }
+
+  // Records the jobs in the current list so the tiles and the results panel
+  // can cover every page visited, not just this one.
+  function noteSeen() {
+    if (!seenLoaded) return;
+    let changed = false;
+    for (const job of jobs) {
+      const known = seen[job.id];
+      if (known && known.title) continue;
+      const meta = cardMeta(job);
+      if (known && !meta.title) continue; // row still a placeholder
+      seen[job.id] = { t: known ? known.t : Date.now(), ...meta };
+      changed = true;
+    }
+    if (!changed) return;
+    clearTimeout(seenTimer);
+    seenTimer = setTimeout(() => {
+      try {
+        chrome.storage.local.set({ [SEEN_KEY]: seen });
+      } catch (e) {
+        /* extension context gone */
+      }
+    }, 1000);
+  }
+
+  function adoptSeen(stored) {
+    const cutoff = Date.now() - SEEN_TTL_MS;
+    const fresh = {};
+    for (const [id, meta] of Object.entries(stored || {})) if (meta && meta.t > cutoff) fresh[id] = meta;
+    return fresh;
+  }
+
+  async function loadSeen() {
+    try {
+      seen = adoptSeen((await chrome.storage.local.get(SEEN_KEY))[SEEN_KEY]);
+    } catch (e) {
+      /* extension context gone */
+    }
+    seenLoaded = true;
+    noteSeen();
+    render();
+    loadCached();
+  }
+
+  // Every scored job seen in the last day, best first: [{ id, result, meta }].
+  function scored() {
+    const ids = new Set([...Object.keys(seen), ...jobs.map((j) => j.id)]);
+    return [...ids]
+      .filter((id) => results.has(id))
+      .map((id) => ({ id, result: results.get(id), meta: seen[id] || {} }))
+      .sort((a, b) => b.result.score - a.result.score);
+  }
+
+  // --- Results panel ----------------------------------------------------------------
+
+  let panel = null;
+  let panelShows = ''; // what the panel was last built from
+
+  function closePanel() {
+    if (panel) panel.remove();
+    panel = null;
+    panelShows = '';
+  }
+
+  // Lists the jobs of the active tile from every page, under the bar.
+  function renderPanel() {
+    const band = BANDS.find((b) => b.key === filter);
+    if (!band || !bar || !bar.isConnected) return closePanel();
+    const rows = scored().filter((s) => bandOf(s.result.score) === band);
+    const shows = `${band.key}|${rows.map((r) => `${r.id}:${r.result.score}:${r.meta.title || ''}`).join(',')}`;
+    if (!panel) {
+      panel = el('div', PANEL_CLASS);
+      document.body.append(panel);
+      panelShows = '';
+    }
+    // sit directly under the bar, as wide as its contents
+    const box = bar.querySelector('.lidist-bar-inner').getBoundingClientRect();
+    const top = bar.getBoundingClientRect().bottom;
+    panel.style.top = `${Math.round(top)}px`;
+    panel.style.left = `${Math.round(box.left)}px`;
+    panel.style.width = `${Math.round(box.width)}px`;
+    panel.style.maxHeight = `${Math.max(160, Math.round(window.innerHeight - top - 16))}px`;
+    if (shows === panelShows) return;
+    panelShows = shows;
+
+    const head = el('div', 'lidist-panel-head');
+    const count = rows.length === 1 ? '1 job' : `${rows.length} jobs`;
+    head.append(el('span', null, `Score ${band.label} · ${count} from the lists you opened in the last 24 hours`));
+    const close = el('button', 'lidist-panel-close', '×');
+    close.type = 'button';
+    close.title = 'Close and clear the filter';
+    close.addEventListener('click', () => {
+      filter = null;
+      render();
+    });
+    head.append(close);
+    const list = el('div', 'lidist-panel-list');
+    if (!rows.length) list.append(el('div', 'lidist-panel-empty', 'No jobs in this range yet.'));
+    for (const { id, result, meta } of rows) {
+      const row = el('a', 'lidist-panel-row');
+      row.href = `https://www.linkedin.com/jobs/view/${id}/`;
+      row.target = '_blank';
+      row.rel = 'noopener noreferrer';
+      const badge = el('span', BADGE_CLASS, `${result.score} · ${result.verdict}`);
+      badge.dataset.verdict = result.verdict;
+      const main = el('span', 'lidist-panel-main');
+      main.append(el('span', 'lidist-panel-title', meta.title || `Job ${id}`));
+      const sub = [meta.company, meta.location].filter(Boolean).join(' · ');
+      if (sub) main.append(el('span', 'lidist-panel-sub', sub));
+      if (result.reason) main.append(el('span', 'lidist-panel-reason', result.reason));
+      row.append(badge, main);
+      list.append(row);
+    }
+    panel.replaceChildren(head, list);
   }
 
   // --- Bar ---------------------------------------------------------------------
@@ -279,7 +472,22 @@
     const toggle = el('button', 'lidist-bar-toggle');
     toggle.type = 'button';
     toggle.addEventListener('click', () => (running ? stop() : start()));
-    inner.append(now, tiles, progress, toggle);
+    const auto = el('label', 'lidist-bar-auto');
+    auto.title = 'When a page is finished, go to the next page of results and keep scoring';
+    const box = el('input');
+    box.type = 'checkbox';
+    box.checked = autoNext;
+    box.addEventListener('change', () => {
+      autoNext = box.checked;
+      try {
+        chrome.storage.sync.set({ bulkAutoNext: autoNext });
+      } catch (e) {
+        /* extension context gone */
+      }
+      render();
+    });
+    auto.append(box, el('span', null, 'Auto next page'));
+    inner.append(now, tiles, progress, auto, toggle);
     node.append(inner);
     return node;
   }
@@ -294,7 +502,8 @@
     const errors = jobs.filter((j) => failed.has(j.id)).length;
     const now = bar.querySelector('.lidist-bar-now');
     const firstError = errors ? failed.get(jobs.find((j) => failed.has(j.id)).id) : '';
-    if (running && nowTitle) setText(now, `Now processing: ${nowTitle}`);
+    if (running && paused) setText(now, 'Paused: keep this tab in front, LinkedIn only loads jobs in a visible tab');
+    else if (running && nowTitle) setText(now, `Now processing: ${nowTitle}`);
     else if (running) setText(now, 'Starting…');
     else if (errors) setText(now, `${errors} failed: ${firstError}`);
     else if (done === jobs.length && jobs.length) setText(now, 'All jobs in this list are scored');
@@ -302,16 +511,17 @@
     now.title = now.textContent;
     now.classList.toggle('lidist-bar-error', !running && !!errors);
 
+    const all = scored();
     for (const band of BANDS) {
       const tile = bar.querySelector(`.lidist-tile[data-band="${band.key}"]`);
-      const count = jobs.filter((j) => results.has(j.id) && bandOf(results.get(j.id).score) === band).length;
+      const count = all.filter((s) => bandOf(s.result.score) === band).length;
       setText(tile.querySelector('.lidist-tile-count'), String(count));
       tile.classList.toggle('lidist-tile-on', filter === band.key);
       tile.classList.toggle('lidist-tile-dim', !!filter && filter !== band.key);
       tile.title =
         band.key === 'low'
-          ? `${count} hidden for scoring under 45. Click to show them.`
-          : `Click to show only jobs scoring ${band.label}`;
+          ? `${count} scored under 45 and hidden from the lists. Click to see them.`
+          : `${count} scored ${band.label} across the lists opened in the last 24 hours. Click to see them.`;
     }
 
     setText(bar.querySelector('.lidist-bar-count'), `${done}/${jobs.length}`);
@@ -319,7 +529,8 @@
     const toggle = bar.querySelector('.lidist-bar-toggle');
     const left = jobs.length - done;
     setText(toggle, running ? 'Stop' : looping ? 'Stopping…' : errors ? 'Retry' : 'Start');
-    toggle.disabled = !running && (looping || !left);
+    toggle.disabled = !running && (looping || (!left && !(autoNext && nextButton())));
+    bar.querySelector('.lidist-bar-auto input').checked = autoNext;
     toggle.classList.toggle('lidist-bar-stop', running);
   }
 
@@ -330,8 +541,10 @@
       const result = results.get(job.id);
       const band = result && bandOf(result.score);
       // hidden: below the cut-off, unless that tile is the active filter;
-      // with a filter on, everything outside it (unscored jobs included)
-      const hide = filter ? !band || band.key !== filter : !!band && band.key === 'low';
+      // with a filter on, everything outside it (unscored jobs included).
+      // A run needs every row in place, so the filter waits until it is over.
+      const active = running ? null : filter;
+      const hide = active ? !band || band.key !== active : !!band && band.key === 'low';
       job.row.classList.toggle(HIDDEN_CLASS, hide);
       // the new layout puts a divider after each row; hide it with the row
       const next = job.row.nextElementSibling;
@@ -360,6 +573,7 @@
   function render() {
     renderBar();
     renderRows();
+    renderPanel();
   }
 
   // --- Mounting the bar ------------------------------------------------------------
@@ -395,6 +609,7 @@
   }
 
   function unmount() {
+    closePanel();
     if (bar) bar.remove();
     bar = null;
     document.querySelectorAll(`[${FIT_ATTR}]`).forEach((node) => {
@@ -430,6 +645,7 @@
       bar.classList.add('lidist-bar-sticky');
       found.list.prepend(bar);
     }
+    noteSeen();
     render();
     loadCached();
   }
@@ -450,8 +666,23 @@
 
   // The Evaluate button and other tabs write scores to the same store.
   try {
+    chrome.storage.sync.get({ bulkAutoNext: false }).then((s) => {
+      autoNext = !!s.bulkAutoNext;
+      render();
+    });
     chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'sync' && changes.bulkAutoNext) {
+        autoNext = !!changes.bulkAutoNext.newValue;
+        render();
+      }
       if (area !== 'local') return;
+      if (changes[SEEN_KEY]) {
+        // another tab added jobs, or the cache was cleared
+        const theirs = adoptSeen(changes[SEEN_KEY].newValue);
+        seen = changes[SEEN_KEY].newValue ? { ...theirs, ...seen } : {};
+        render();
+        loadCached();
+      }
       let touched = false;
       for (const [key, change] of Object.entries(changes)) {
         if (!key.startsWith('triage:')) continue;
@@ -466,5 +697,13 @@
     /* extension context gone */
   }
 
+  window.addEventListener('resize', () => panel && renderPanel());
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !panel) return;
+    filter = null;
+    render();
+  });
+
+  loadSeen();
   scan();
 })();
