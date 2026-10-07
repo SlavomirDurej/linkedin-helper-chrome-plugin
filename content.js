@@ -576,7 +576,15 @@
       if (anchor && !isFlexRow(anchor.parentElement)) anchor = save;
       if (anchor) {
         anchor.after(evalBtn, sendBtn);
-        anchor.parentElement.after(reason);
+        // LinkedIn's grids stack their children in one cell, so the reason
+        // has to go after the outermost grid around the row, not inside it.
+        let holder = anchor.parentElement;
+        while (card.contains(holder.parentElement) && getComputedStyle(holder.parentElement).display.includes('grid')) {
+          holder = holder.parentElement;
+        }
+        holder.after(reason);
+        const spaced = parseFloat(getComputedStyle(holder.parentElement).rowGap) > 0;
+        reason.style.marginTop = spaced ? '0' : '';
       } else {
         card.append(evalBtn, sendBtn, reason);
       }
