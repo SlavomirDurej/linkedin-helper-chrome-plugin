@@ -32,6 +32,25 @@
   const SVG_NS = 'http://www.w3.org/2000/svg';
 
   const results = new Map(); // "location|company" -> Promise<response>
+  // Nodes this instance created. Reloading the extension leaves the previous
+  // instance's pin and buttons in the page with dead handlers; anything with
+  // our classes that is not in here is such a leftover and gets removed.
+  const mine = new WeakSet();
+  const own = (node) => (mine.add(node), node);
+  const OURS = `.${POPOVER_CLASS}, .${PIN_CLASS}, .${BTN_CLASS}, .${REASON_CLASS}`;
+
+  function dropLeftovers() {
+    document.querySelectorAll(OURS).forEach((n) => mine.has(n) || n.remove());
+  }
+
+  // False once the extension has been reloaded or removed under this page.
+  function alive() {
+    try {
+      return !!chrome.runtime.id;
+    } catch (e) {
+      return false;
+    }
+  }
   let popover = null;
   let activePin = null;
   let pinned = false;
@@ -152,7 +171,7 @@
   }
 
   function createPin(loc) {
-    const pin = document.createElement('span');
+    const pin = own(document.createElement('span'));
     pin.className = PIN_CLASS;
     pin.dataset.loc = loc;
     pin.setAttribute('role', 'button');
@@ -269,7 +288,7 @@
 
   function ensurePopover() {
     if (popover && popover.isConnected) return popover;
-    popover = el('div', POPOVER_CLASS);
+    popover = own(el('div', POPOVER_CLASS));
     popover.setAttribute('role', 'tooltip');
     popover.addEventListener('mouseenter', () => clearTimeout(hideTimer));
     popover.addEventListener('mouseleave', scheduleHide);
@@ -423,7 +442,8 @@
       .map((l) => l.replace(/\s+$/, ''))
       .join('\n')
       .replace(/\n{3,}/g, '\n\n')
-      .trim();
+      .trim()
+      .replace(/\n+…\s*(see |show )?more$/i, ''); // the "… more" expander, not part of the text
     return `${cardText(card)}\n\n${body}`;
   }
 
@@ -476,7 +496,7 @@
   const NEW_TAB_ICON = 'M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4';
 
   function createButton(className, label, children, onClick) {
-    const btn = el('button', `${BTN_CLASS} ${className}`);
+    const btn = own(el('button', `${BTN_CLASS} ${className}`));
     btn.type = 'button';
     btn.append(...children(el('span', 'lidist-btn-label', label)));
     btn.addEventListener('click', (e) => {
@@ -513,10 +533,14 @@
     setLabel(btn, result ? `${result.score} · ${result.verdict}` : EVAL_LABEL);
     btn.title = result ? 'Click to evaluate again' : 'Quick fit score for this job';
     btn.result = result;
+    showReason(result);
+  }
+
+  function showReason(result) {
     const reason = document.querySelector(`.${REASON_CLASS}`);
     if (!reason) return;
     reason.textContent = (result && result.reason) || '';
-    reason.dataset.verdict = btn.dataset.verdict;
+    reason.dataset.verdict = result ? result.verdict : '';
   }
 
   function createEvalButton() {
@@ -563,8 +587,10 @@
     }
     const evalBtn = document.querySelector(`.${EVAL_CLASS}`) || createEvalButton();
     const sendBtn = document.querySelector(`.${SEND_CLASS}`) || createSendButton();
-    const reason = document.querySelector(`.${REASON_CLASS}`) || el('div', REASON_CLASS);
-    if (!card.contains(evalBtn) || !card.contains(sendBtn) || !card.contains(reason)) {
+    const reason = document.querySelector(`.${REASON_CLASS}`) || own(el('div', REASON_CLASS));
+    // the reason may legitimately sit just after the card (see below)
+    const reasonPlaced = card.contains(reason) || card.nextElementSibling === reason;
+    if (!card.contains(evalBtn) || !card.contains(sendBtn) || !reasonPlaced) {
       const save = findSaveButton(card);
       // LinkedIn may wrap each button in its own box: climb to the item that
       // sits directly in the horizontal button row and join that row.
@@ -579,7 +605,7 @@
         // LinkedIn's grids stack their children in one cell, so the reason
         // has to go after the outermost grid around the row, not inside it.
         let holder = anchor.parentElement;
-        while (card.contains(holder.parentElement) && getComputedStyle(holder.parentElement).display.includes('grid')) {
+        while (holder !== card && getComputedStyle(holder.parentElement).display.includes('grid')) {
           holder = holder.parentElement;
         }
         holder.after(reason);
@@ -588,7 +614,7 @@
       } else {
         card.append(evalBtn, sendBtn, reason);
       }
-      showVerdict(evalBtn, evalBtn.result || null);
+      showReason(evalBtn.result);
       const rowGap = anchor && parseFloat(getComputedStyle(anchor.parentElement).columnGap) > 0;
       for (const btn of save ? [evalBtn, sendBtn] : []) {
         // same height and text size as LinkedIn's own buttons
@@ -603,6 +629,13 @@
   // --- Wiring ----------------------------------------------------------------
 
   function scan() {
+    if (!alive()) {
+      // a newer instance has taken over (or will after a refresh): stand down
+      observer.disconnect();
+      hide();
+      return;
+    }
+    dropLeftovers();
     if (!onJobsPage()) return;
     placeButtons();
     if (activePin && !activePin.isConnected) hide();
@@ -622,8 +655,7 @@
     scanTimer = setTimeout(scan, 300);
   }
 
-  const OURS = `.${POPOVER_CLASS}, .${PIN_CLASS}, .${BTN_CLASS}, .${REASON_CLASS}`;
-  new MutationObserver((mutations) => {
+  const observer = new MutationObserver((mutations) => {
     // ignore the mutations caused by our own pin/popover/buttons
     const external = mutations.some((m) => {
       const t = m.target.nodeType === 1 ? m.target : m.target.parentElement;
@@ -632,7 +664,8 @@
       return !nodes.length || nodes.some((n) => !(n.nodeType === 1 && n.matches(OURS)));
     });
     if (external) scheduleScan();
-  }).observe(document.body, { childList: true, subtree: true, characterData: true });
+  });
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
 
   // Changing the postcode or units invalidates anything already computed.
   try {
@@ -641,10 +674,19 @@
         results.clear();
         hide();
       }
+      // the list-scoring bar (bulk.js) may have just scored the open job
+      const scored = area === 'local' && changes[`triage:${jobId()}`];
+      const evalBtn = document.querySelector(`.${EVAL_CLASS}`);
+      if (scored && evalBtn && mine.has(evalBtn) && !evalBtn.classList.contains('lidist-eval-busy')) {
+        showVerdict(evalBtn, scored.newValue ? scored.newValue.v : null);
+      }
     });
   } catch (e) {
     /* extension context gone */
   }
+
+  // bulk.js runs in the same isolated world and reads the open job through this
+  window.__lidist = { jobText, jobId };
 
   scan();
 })();

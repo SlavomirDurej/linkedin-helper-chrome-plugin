@@ -11,7 +11,7 @@
   "run": [
     {
       "name": "Syntax check",
-      "command": "node --check background.js && node --check content.js && node --check options.js && node --check claude.js",
+      "command": "node --check background.js && node --check content.js && node --check options.js && node --check claude.js && node --check bulk.js",
       "description": "Parses the four extension scripts. After any change, reload the extension in chrome://extensions and refresh the LinkedIn tab."
     }
   ],

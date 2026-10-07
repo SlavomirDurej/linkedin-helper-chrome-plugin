@@ -22,6 +22,8 @@ Personal-use tool, loaded unpacked. It is not published to the Chrome Web Store 
 
 - Adds an **Evaluate** button next to Save (see [Evaluate](#evaluate)).
 - Adds a **Send to Claude** button after it (see [Send to Claude](#send-to-claude)).
+- Adds a bar above the job list on search pages that scores the whole list (see
+  [Scoring a whole list](#scoring-a-whole-list)).
 
 ## Install
 
@@ -29,7 +31,8 @@ Personal-use tool, loaded unpacked. It is not published to the Chrome Web Store 
 2. Click **Load unpacked** and choose this folder.
 3. Refresh any LinkedIn tab that was already open, then click a job.
 
-After changing any file, click the reload button on the extension's card and refresh the LinkedIn tab.
+After changing any file, click the reload button on the extension's card. Open LinkedIn tabs pick up the
+new version by themselves; if a tab still misbehaves, refresh it.
 
 ## Settings
 
@@ -104,6 +107,24 @@ one-sentence reason on the line below:
    the model to return JSON with an integer `score` from 0 to 100 and a one-sentence `reason`. The file is git-ignored because it is
    personal; edits take effect on the next click, with no reload.
 
+## Scoring a whole list
+
+On job search pages a bar appears above the job list. **Start** opens every job in the list in turn and
+scores it exactly as the Evaluate button would, from the full description; **Stop** pauses it.
+
+- Each scored job gets its score and verdict under its title in the list, e.g. `58 · maybe`. Hover it
+  for the reason.
+- Jobs scoring under 45 are hidden from the list.
+- The tiles count jobs per score range (`<45`, `45-60`, `61-70`, `71-80`, `81-90`, `91-100`). Click a
+  tile to show only that range; click it again to clear the filter. The `<45` tile shows the hidden jobs.
+- The bar shows the job being processed and a progress count for the current list.
+- Scores are shared with the Evaluate button and kept for 30 days, so jobs scored before are not paid
+  for again. **Clear cache** forgets them.
+
+Each job is opened in the details pane so the complete posting is scored, which means LinkedIn marks
+them as viewed and the pane steps through the list while it runs. When the run ends, the job that was
+open before is opened again. A page of 25 jobs takes about a minute.
+
 ## Send to Claude
 
 Clicking the button collects, from the open job:
@@ -126,6 +147,7 @@ that one tab and dropped after two minutes if the page never picks it up.
 | `content.css` | Pin and popover styles. |
 | `background.js` | Service worker. Does all network calls and caching; opens the Claude tab. |
 | `triage-prompt.md` | Prompt for Evaluate. Git-ignored; create it yourself. |
+| `bulk.js` | Runs on linkedin.com. The list-scoring bar, list scores and filters. |
 | `claude.js` | Runs on claude.ai. Pastes a job sent from LinkedIn into the message box and sends it. |
 | `options.html`, `options.js` | Settings popup. |
 | `icons/` | Toolbar and store icons. |

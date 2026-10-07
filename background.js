@@ -382,6 +382,29 @@ async function getEvaluation(jobId) {
   return hit && Date.now() - hit.t < CACHE_TTL_MS ? hit.v : null;
 }
 
+// Reloading or updating the extension orphans the content script in LinkedIn
+// tabs that are already open, which leaves the buttons there dead. Start a
+// fresh copy in those tabs so they keep working without a page refresh.
+// Stored scores for a batch of jobs, as { jobId: result }.
+async function getEvaluations(jobIds) {
+  const keys = jobIds.map((id) => `triage:${id}`);
+  const hits = await chrome.storage.local.get(keys);
+  const out = {};
+  for (const [key, hit] of Object.entries(hits)) {
+    if (hit && Date.now() - hit.t < CACHE_TTL_MS) out[key.slice(7)] = hit.v;
+  }
+  return out;
+}
+
+chrome.runtime.onInstalled.addListener(async () => {
+  const tabs = await chrome.tabs.query({ url: 'https://www.linkedin.com/*' }).catch(() => []);
+  for (const tab of tabs) {
+    const target = { tabId: tab.id };
+    chrome.scripting.insertCSS({ target, files: ['content.css'] }).catch(() => {});
+    chrome.scripting.executeScript({ target, files: ['content.js', 'bulk.js'] }).catch(() => {});
+  }
+});
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg !== 'object') return false;
   let work;
@@ -391,6 +414,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   else if (msg.type === 'sendToClaude') work = sendToClaude(String(msg.text || ''));
   else if (msg.type === 'evaluateJob') work = evaluateJob(String(msg.jobId || ''), String(msg.text || ''));
   else if (msg.type === 'getEvaluation') work = getEvaluation(String(msg.jobId || ''));
+  else if (msg.type === 'getEvaluations') work = getEvaluations((msg.jobIds || []).map(String));
   else if (msg.type === 'takeClaudePending') work = takeClaudePending(sender.tab && sender.tab.id);
   else return false;
   work.then(
