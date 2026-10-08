@@ -132,6 +132,27 @@ them as viewed and the pane steps through the list while it runs. When the run e
 open before is opened again. A page of 25 jobs takes about a minute. Keep the tab in front while it
 runs: LinkedIn does not load jobs in a background tab, so the run pauses until you come back.
 
+## Applied and removed jobs
+
+Two marks keep jobs you have dealt with out of the way. Both are remembered for 180 days and survive
+**Clear cache**.
+
+- **Applied:** you applied to the job.
+- **Removed:** you looked at it and do not want to see it again.
+
+Where to set them:
+
+- On the open job, the line under the buttons has **✓ Mark as applied** and **✕ Remove from my lists**.
+  Once marked, that line says so, with the date and an **Undo**.
+- In the job list, every row has small **✓** and **✕** buttons next to its score.
+- In the results panel, every row has the same two buttons.
+
+Marked jobs disappear from the list and from the results panel, and a scoring run skips them. The bar
+has an **Applied** and a **Removed** tile: click one to see those jobs again (in the list and in the
+panel), where **Undo** or a second click on the button clears the mark.
+
+When LinkedIn itself shows "Applied … ago" on a job, it is marked as applied automatically.
+
 ## Send to Claude
 
 Clicking the button collects, from the open job:

@@ -385,6 +385,40 @@ async function getEvaluation(jobId) {
 // Reloading or updating the extension orphans the content script in LinkedIn
 // tabs that are already open, which leaves the buttons there dead. Start a
 // fresh copy in those tabs so they keep working without a page refresh.
+// --- Applied / removed marks ---------------------------------------------------
+
+// One record per job the user marked: { s: 'applied' | 'removed', t, title,
+// company, location }. Not part of the cache, so "Clear cache" leaves it alone.
+const MARKS_KEY = 'jobMarks';
+const MARK_TTL_MS = 180 * 24 * 60 * 60 * 1000; // postings are long gone by then
+
+// Writes go through one queue so two tabs cannot overwrite each other.
+let markQueue = Promise.resolve();
+function setMark(jobId, state, meta) {
+  const run = async () => {
+    const all = (await chrome.storage.local.get(MARKS_KEY))[MARKS_KEY] || {};
+    const cutoff = Date.now() - MARK_TTL_MS;
+    for (const id of Object.keys(all)) if (!all[id] || all[id].t < cutoff) delete all[id];
+    if (state === 'applied' || state === 'removed') {
+      const old = all[jobId] || {};
+      all[jobId] = {
+        s: state,
+        t: Date.now(),
+        title: String(meta.title || old.title || '').slice(0, 200),
+        company: String(meta.company || old.company || '').slice(0, 200),
+        location: String(meta.location || old.location || '').slice(0, 200)
+      };
+    } else {
+      delete all[jobId];
+    }
+    await chrome.storage.local.set({ [MARKS_KEY]: all });
+    return true;
+  };
+  const done = markQueue.then(run, run);
+  markQueue = done.catch(() => {});
+  return done;
+}
+
 // Stored scores for a batch of jobs, as { jobId: result }.
 async function getEvaluations(jobIds) {
   const keys = jobIds.map((id) => `triage:${id}`);
@@ -415,6 +449,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   else if (msg.type === 'evaluateJob') work = evaluateJob(String(msg.jobId || ''), String(msg.text || ''));
   else if (msg.type === 'getEvaluation') work = getEvaluation(String(msg.jobId || ''));
   else if (msg.type === 'getEvaluations') work = getEvaluations((msg.jobIds || []).map(String));
+  else if (msg.type === 'setMark' && msg.jobId) work = setMark(String(msg.jobId), msg.state, msg.meta || {});
   else if (msg.type === 'takeClaudePending') work = takeClaudePending(sender.tab && sender.tab.id);
   else return false;
   work.then(

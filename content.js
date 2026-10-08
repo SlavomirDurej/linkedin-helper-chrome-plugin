@@ -37,7 +37,8 @@
   // our classes that is not in here is such a leftover and gets removed.
   const mine = new WeakSet();
   const own = (node) => (mine.add(node), node);
-  const OURS = `.${POPOVER_CLASS}, .${PIN_CLASS}, .${BTN_CLASS}, .${REASON_CLASS}`;
+  const MARKS_CLASS = 'lidist-marks';
+  const OURS = `.${POPOVER_CLASS}, .${PIN_CLASS}, .${BTN_CLASS}, .${REASON_CLASS}, .${MARKS_CLASS}`;
 
   function dropLeftovers() {
     document.querySelectorAll(OURS).forEach((n) => mine.has(n) || n.remove());
@@ -579,17 +580,75 @@
     return s.display.includes('flex') && !s.flexDirection.includes('column');
   }
 
+  // --- Applied / removed marks -------------------------------------------------
+
+  const MARKS_KEY = 'jobMarks';
+  let marks = {}; // jobId -> { s: 'applied' | 'removed', t, title, company, location }
+  const autoMarked = new Set(); // jobs already marked from LinkedIn's own "Applied" notice
+
+  // Title, company and location of the open job, for the lists that show marks.
+  function paneMeta(card) {
+    const lines = card ? cardText(card).split('\n') : [];
+    return { company: lines[0] || '', title: lines[1] || '', location: norm((lines[2] || '').split('·')[0]) };
+  }
+
+  function setMark(state) {
+    const job = jobId();
+    if (job) ask({ type: 'setMark', jobId: job, state, meta: paneMeta(findTopCard(findDescription())) });
+  }
+
+  function markButton(text, title, state) {
+    const btn = el('button', 'lidist-mark-btn', text);
+    btn.type = 'button';
+    btn.title = title;
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setMark(state);
+    });
+    return btn;
+  }
+
+  // The line under the buttons: mark the open job as applied or removed, or
+  // show that it already is.
+  function renderMarks(card) {
+    const row = document.querySelector(`.${MARKS_CLASS}`);
+    if (!row || !mine.has(row)) return;
+    const job = jobId();
+    const mark = marks[job];
+    // LinkedIn says so itself for jobs applied to through it
+    if (!mark && card && !autoMarked.has(job) && card.innerText.split('\n').some((l) => /^applied\b.*\bago$/i.test(norm(l)))) {
+      autoMarked.add(job);
+      setMark('applied');
+    }
+    const shows = `${job}|${mark ? mark.s + mark.t : ''}`;
+    if (row.dataset.shows === shows) return;
+    row.dataset.shows = shows;
+    row.dataset.state = mark ? mark.s : '';
+    if (!mark) {
+      row.replaceChildren(
+        markButton('✓ Mark as applied', 'Remember that you applied; the job leaves your lists', 'applied'),
+        markButton('✕ Remove from my lists', 'Hide this job from the list and the results panel', 'removed')
+      );
+      return;
+    }
+    const when = new Date(mark.t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+    const text = mark.s === 'applied' ? `✓ You applied to this job (marked ${when})` : `✕ Removed from your lists on ${when}`;
+    row.replaceChildren(el('span', 'lidist-marks-text', text), markButton('Undo', 'Clear this mark', null));
+  }
+
   function placeButtons() {
     const card = findTopCard(findDescription());
     if (!card) {
-      document.querySelectorAll(`.${BTN_CLASS}, .${REASON_CLASS}`).forEach((b) => b.remove());
+      document.querySelectorAll(`.${BTN_CLASS}, .${REASON_CLASS}, .${MARKS_CLASS}`).forEach((b) => b.remove());
       return;
     }
     const evalBtn = document.querySelector(`.${EVAL_CLASS}`) || createEvalButton();
     const sendBtn = document.querySelector(`.${SEND_CLASS}`) || createSendButton();
     const reason = document.querySelector(`.${REASON_CLASS}`) || own(el('div', REASON_CLASS));
+    const marksRow = document.querySelector(`.${MARKS_CLASS}`) || own(el('div', MARKS_CLASS));
     // the reason may legitimately sit just after the card (see below)
-    const reasonPlaced = card.contains(reason) || card.nextElementSibling === reason;
+    const reasonPlaced = (card.contains(reason) || card.nextElementSibling === reason) && reason.nextElementSibling === marksRow;
     if (!card.contains(evalBtn) || !card.contains(sendBtn) || !reasonPlaced) {
       const save = findSaveButton(card);
       // LinkedIn may wrap each button in its own box: climb to the item that
@@ -608,11 +667,12 @@
         while (holder !== card && getComputedStyle(holder.parentElement).display.includes('grid')) {
           holder = holder.parentElement;
         }
-        holder.after(reason);
+        holder.after(reason, marksRow);
         const spaced = parseFloat(getComputedStyle(holder.parentElement).rowGap) > 0;
         reason.style.marginTop = spaced ? '0' : '';
+        marksRow.style.marginTop = spaced ? '0' : '';
       } else {
-        card.append(evalBtn, sendBtn, reason);
+        card.append(evalBtn, sendBtn, reason, marksRow);
       }
       showReason(evalBtn.result);
       const rowGap = anchor && parseFloat(getComputedStyle(anchor.parentElement).columnGap) > 0;
@@ -624,6 +684,7 @@
       }
     }
     syncEvalButton(evalBtn);
+    renderMarks(card);
   }
 
   // --- Wiring ----------------------------------------------------------------
@@ -669,7 +730,15 @@
 
   // Changing the postcode or units invalidates anything already computed.
   try {
+    chrome.storage.local.get(MARKS_KEY).then((s) => {
+      marks = s[MARKS_KEY] || {};
+      renderMarks(null);
+    });
     chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && changes[MARKS_KEY]) {
+        marks = changes[MARKS_KEY].newValue || {};
+        renderMarks(null);
+      }
       if ((area === 'sync' && (changes.postcode || changes.units)) || (area === 'local' && changes.googleKey)) {
         results.clear();
         hide();

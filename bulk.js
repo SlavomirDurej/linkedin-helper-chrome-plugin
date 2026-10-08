@@ -11,7 +11,9 @@
   const HIDDEN_CLASS = 'lidist-hidden';
   const FIT_ATTR = 'data-lidist-fit';
   const PANEL_CLASS = 'lidist-panel';
-  const OURS = `.${BAR_CLASS}, .${BADGE_CLASS}, .${PANEL_CLASS}`;
+  const ROWBAR_CLASS = 'lidist-rowbar';
+  const OURS = `.${BAR_CLASS}, .${BADGE_CLASS}, .${PANEL_CLASS}, .${ROWBAR_CLASS}`;
+  const MARKS_KEY = 'jobMarks';
   const SEEN_KEY = 'bulkSeen';
   const SEEN_TTL_MS = 24 * 60 * 60 * 1000;
   const BAR_HEIGHT = 56;
@@ -26,6 +28,12 @@
     { key: 'b5', min: 91, max: 100, label: '91-100' }
   ];
   const bandOf = (score) => BANDS.find((b) => score >= b.min && score <= b.max);
+  // Jobs the user marked. They leave the lists and get a tile of their own.
+  const MARKS = [
+    { key: 'applied', label: 'Applied', badge: '✓ Applied' },
+    { key: 'removed', label: 'Removed', badge: '✕ Removed' }
+  ];
+  const TILES = [...BANDS, ...MARKS];
 
   const results = new Map(); // jobId -> { score, verdict, reason }
   const failed = new Map(); // jobId -> error message, cleared on Start
@@ -44,6 +52,8 @@
   let seen = {}; // jobId -> { t, title, company, location } for every list row met in the last day
   let seenLoaded = false;
   let seenTimer = null;
+  let marks = {}; // jobId -> { s: 'applied' | 'removed', t, title, company, location }
+  const markOf = (id) => (marks[id] ? marks[id].s : '');
 
   const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
 
@@ -242,7 +252,12 @@
 
   // --- Processing --------------------------------------------------------------
 
-  const pending = () => jobs.filter((j) => !results.has(j.id) && !failed.has(j.id) && !busy.has(j.id));
+  const pending = () => jobs.filter((j) => !results.has(j.id) && !failed.has(j.id) && !busy.has(j.id) && !marks[j.id]);
+
+  // Marks or, when the job already has that mark, clears it.
+  function toggleMark(id, state, meta) {
+    ask({ type: 'setMark', jobId: id, state: markOf(id) === state ? null : state, meta });
+  }
 
   // The model call runs while the next job is already being opened.
   function evaluate(id, text) {
@@ -311,7 +326,7 @@
 
   // Scores from earlier sessions, and from the Evaluate button, are free.
   async function loadCached() {
-    const ids = [...new Set([...jobs.map((j) => j.id), ...Object.keys(seen)])].filter((id) => !asked.has(id));
+    const ids = [...new Set([...jobs.map((j) => j.id), ...Object.keys(seen), ...Object.keys(marks)])].filter((id) => !asked.has(id));
     if (!ids.length) return;
     ids.forEach((id) => asked.add(id));
     const res = await ask({ type: 'getEvaluations', jobIds: ids });
@@ -327,7 +342,7 @@
     const lines = (job.card.innerText || '')
       .split('\n')
       .map(norm)
-      .filter((l) => l && !/^\d{1,3} · /.test(l)) // not our own score line
+      .filter((l) => l && !/^\d{1,3} · /.test(l) && !/^[✓✕]/.test(l)) // not our own score line and buttons
       .filter((l) => !job.title || !l.startsWith(job.title)) // the title, and its "with verification" twin
       .filter((l) => !/^(viewed|promoted|·|easy apply|be an early applicant|dismiss.*|(posted )?.* ago)$/i.test(l));
     return { title: job.title, company: lines[0] || '', location: lines[1] || '' };
@@ -366,7 +381,9 @@
 
   async function loadSeen() {
     try {
-      seen = adoptSeen((await chrome.storage.local.get(SEEN_KEY))[SEEN_KEY]);
+      const stored = await chrome.storage.local.get([SEEN_KEY, MARKS_KEY]);
+      marks = stored[MARKS_KEY] || {};
+      seen = adoptSeen(stored[SEEN_KEY]);
     } catch (e) {
       /* extension context gone */
     }
@@ -380,7 +397,7 @@
   function scored() {
     const ids = new Set([...Object.keys(seen), ...jobs.map((j) => j.id)]);
     return [...ids]
-      .filter((id) => results.has(id))
+      .filter((id) => results.has(id) && !marks[id])
       .map((id) => ({ id, result: results.get(id), meta: seen[id] || {} }))
       .sort((a, b) => b.result.score - a.result.score);
   }
@@ -398,10 +415,16 @@
 
   // Lists the jobs of the active tile from every page, under the bar.
   function renderPanel() {
-    const band = BANDS.find((b) => b.key === filter);
+    const band = TILES.find((b) => b.key === filter);
     if (!band || !bar || !bar.isConnected) return closePanel();
-    const rows = scored().filter((s) => bandOf(s.result.score) === band);
-    const shows = `${band.key}|${rows.map((r) => `${r.id}:${r.result.score}:${r.meta.title || ''}`).join(',')}`;
+    const marked = MARKS.includes(band);
+    const rows = marked
+      ? Object.keys(marks)
+          .filter((id) => marks[id].s === band.key)
+          .sort((a, b) => marks[b].t - marks[a].t)
+          .map((id) => ({ id, result: results.get(id), meta: marks[id] }))
+      : scored().filter((s) => bandOf(s.result.score) === band);
+    const shows = `${band.key}|${rows.map((r) => `${r.id}:${r.result ? r.result.score : ''}:${r.meta.title || ''}`).join(',')}`;
     if (!panel) {
       panel = el('div', PANEL_CLASS);
       document.body.append(panel);
@@ -419,7 +442,15 @@
 
     const head = el('div', 'lidist-panel-head');
     const count = rows.length === 1 ? '1 job' : `${rows.length} jobs`;
-    head.append(el('span', null, `Score ${band.label} · ${count} from the lists you opened in the last 24 hours`));
+    head.append(
+      el(
+        'span',
+        null,
+        marked
+          ? `${band.label} · ${count} you marked, newest first`
+          : `Score ${band.label} · ${count} from the lists you opened in the last 24 hours`
+      )
+    );
     const close = el('button', 'lidist-panel-close', '×');
     close.type = 'button';
     close.title = 'Close and clear the filter';
@@ -435,14 +466,31 @@
       row.href = `https://www.linkedin.com/jobs/view/${id}/`;
       row.target = '_blank';
       row.rel = 'noopener noreferrer';
-      const badge = el('span', BADGE_CLASS, `${result.score} · ${result.verdict}`);
-      badge.dataset.verdict = result.verdict;
+      const badge = el('span', BADGE_CLASS, result ? `${result.score} · ${result.verdict}` : band.badge);
+      badge.dataset.verdict = result ? result.verdict : band.key;
       const main = el('span', 'lidist-panel-main');
       main.append(el('span', 'lidist-panel-title', meta.title || `Job ${id}`));
       const sub = [meta.company, meta.location].filter(Boolean).join(' · ');
       if (sub) main.append(el('span', 'lidist-panel-sub', sub));
-      if (result.reason) main.append(el('span', 'lidist-panel-reason', result.reason));
-      row.append(badge, main);
+      if (result && result.reason) main.append(el('span', 'lidist-panel-reason', result.reason));
+      const acts = el('span', 'lidist-panel-acts');
+      const act = (state, text, title) => {
+        const btn = el('button', 'lidist-rowbtn', text);
+        btn.type = 'button';
+        btn.title = title;
+        btn.addEventListener('click', (e) => {
+          e.preventDefault(); // the row itself is a link to the job
+          e.stopPropagation();
+          toggleMark(id, state, meta);
+        });
+        acts.append(btn);
+      };
+      if (marked) act(band.key, 'Undo', 'Clear this mark');
+      else {
+        act('applied', '✓', 'I applied to this job');
+        act('removed', '✕', 'Remove from my lists');
+      }
+      row.append(badge, main, acts);
       list.append(row);
     }
     panel.replaceChildren(head, list);
@@ -455,7 +503,7 @@
     const inner = el('div', 'lidist-bar-inner');
     const now = el('div', 'lidist-bar-now');
     const tiles = el('div', 'lidist-bar-tiles');
-    for (const band of BANDS) {
+    for (const band of TILES) {
       const tile = el('button', 'lidist-tile');
       tile.type = 'button';
       tile.dataset.band = band.key;
@@ -498,7 +546,7 @@
 
   function renderBar() {
     if (!bar) return;
-    const done = jobs.filter((j) => results.has(j.id)).length;
+    const done = jobs.filter((j) => results.has(j.id) || marks[j.id]).length;
     const errors = jobs.filter((j) => failed.has(j.id)).length;
     const now = bar.querySelector('.lidist-bar-now');
     const firstError = errors ? failed.get(jobs.find((j) => failed.has(j.id)).id) : '';
@@ -512,16 +560,19 @@
     now.classList.toggle('lidist-bar-error', !running && !!errors);
 
     const all = scored();
-    for (const band of BANDS) {
+    for (const band of TILES) {
       const tile = bar.querySelector(`.lidist-tile[data-band="${band.key}"]`);
-      const count = all.filter((s) => bandOf(s.result.score) === band).length;
+      const marked = MARKS.includes(band);
+      const count = marked
+        ? Object.values(marks).filter((m) => m.s === band.key).length
+        : all.filter((s) => bandOf(s.result.score) === band).length;
       setText(tile.querySelector('.lidist-tile-count'), String(count));
       tile.classList.toggle('lidist-tile-on', filter === band.key);
       tile.classList.toggle('lidist-tile-dim', !!filter && filter !== band.key);
-      tile.title =
-        band.key === 'low'
-          ? `${count} scored under 45 and hidden from the lists. Click to see them.`
-          : `${count} scored ${band.label} across the lists opened in the last 24 hours. Click to see them.`;
+      if (band.key === 'applied') tile.title = `${count} jobs you marked as applied. They are hidden from the lists. Click to see them.`;
+      else if (band.key === 'removed') tile.title = `${count} jobs you removed. They are hidden from the lists. Click to see them.`;
+      else if (band.key === 'low') tile.title = `${count} scored under 45 and hidden from the lists. Click to see them.`;
+      else tile.title = `${count} scored ${band.label} across the lists opened in the last 24 hours. Click to see them.`;
     }
 
     setText(bar.querySelector('.lidist-bar-count'), `${done}/${jobs.length}`);
@@ -536,37 +587,63 @@
 
   // --- List rows -----------------------------------------------------------------
 
+  // Under each job title: the score (or mark) and two quick buttons.
+  function buildRowbar() {
+    const rowbar = el('div', ROWBAR_CLASS);
+    const act = (state, text, title) => {
+      const btn = el('button', 'lidist-rowbtn', text);
+      btn.type = 'button';
+      btn.dataset.act = state;
+      btn.title = title;
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation(); // do not open the job
+        const id = rowbar.dataset.id;
+        const job = jobs.find((j) => j.id === id);
+        toggleMark(id, state, job ? cardMeta(job) : {});
+      });
+      return btn;
+    };
+    rowbar.append(
+      el('span', BADGE_CLASS),
+      act('applied', '✓', 'I applied to this job (click again to undo)'),
+      act('removed', '✕', 'Remove from my lists (click again to undo)')
+    );
+    return rowbar;
+  }
+
   function renderRows() {
+    const active = running ? null : filter; // a run needs every row in place
     for (const job of jobs) {
       const result = results.get(job.id);
       const band = result && bandOf(result.score);
-      // hidden: below the cut-off, unless that tile is the active filter;
-      // with a filter on, everything outside it (unscored jobs included).
-      // A run needs every row in place, so the filter waits until it is over.
-      const active = running ? null : filter;
-      const hide = active ? !band || band.key !== active : !!band && band.key === 'low';
+      const mark = markOf(job.id);
+      // marked jobs only show under their own tile; otherwise hidden are the
+      // jobs below the cut-off, or with a filter on everything outside it
+      // (unscored jobs included)
+      let hide;
+      if (mark) hide = active !== mark;
+      else if (active) hide = !band || band.key !== active;
+      else hide = !!band && band.key === 'low';
       job.row.classList.toggle(HIDDEN_CLASS, hide);
       // the new layout puts a divider after each row; hide it with the row
       const next = job.row.nextElementSibling;
       if (next && next.tagName === 'HR') next.classList.toggle(HIDDEN_CLASS, hide);
 
-      let badge = job.card.querySelector(`.${BADGE_CLASS}`);
-      if (badge && !mine.has(badge)) {
-        badge.remove(); // left behind by an earlier copy of the extension
-        badge = null;
-      }
-      if (!result) {
-        if (badge) badge.remove();
-        continue;
-      }
       if (!job.anchor) continue; // row not rendered yet; a later scan adds it
-      if (!badge) {
-        badge = el('div', BADGE_CLASS);
-        job.anchor.after(badge);
+      let rowbar = job.card.querySelector(`.${ROWBAR_CLASS}`);
+      if (!rowbar) {
+        rowbar = buildRowbar();
+        job.anchor.after(rowbar);
       }
-      setText(badge, `${result.score} · ${result.verdict}`);
-      badge.dataset.verdict = result.verdict;
-      badge.title = result.reason || '';
+      rowbar.dataset.id = job.id;
+      const badge = rowbar.querySelector(`.${BADGE_CLASS}`);
+      const text = mark ? MARKS.find((m) => m.key === mark).badge : result ? `${result.score} · ${result.verdict}` : '';
+      setText(badge, text);
+      badge.hidden = !text;
+      badge.dataset.verdict = mark || (result ? result.verdict : '');
+      badge.title = (result && result.reason) || '';
+      for (const btn of rowbar.querySelectorAll('.lidist-rowbtn')) btn.classList.toggle('lidist-rowbtn-on', btn.dataset.act === mark);
     }
   }
 
@@ -676,6 +753,11 @@
         render();
       }
       if (area !== 'local') return;
+      if (changes[MARKS_KEY]) {
+        marks = changes[MARKS_KEY].newValue || {};
+        render();
+        loadCached();
+      }
       if (changes[SEEN_KEY]) {
         // another tab added jobs, or the cache was cleared
         const theirs = adoptSeen(changes[SEEN_KEY].newValue);
